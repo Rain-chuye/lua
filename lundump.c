@@ -14,6 +14,7 @@
 
 #include "lua.h"
 
+#include "lobfuscator.h"
 #include "ldebug.h"
 #include "ldo.h"
 #include "lfunc.h"
@@ -95,12 +96,18 @@ static TString *LoadString (LoadState *S) {
     return NULL;
   else if (--size <= LUAI_MAXSHORTLEN) {  /* short string? */
     char buff[LUAI_MAXSHORTLEN];
+    unsigned int j;
     LoadVector(S, buff, size);
+    for (j = 0; j < size; j++) buff[j] ^= LUA_CONST_XOR;
     return luaS_newlstr(S->L, buff, size);
   }
   else {  /* long string */
     TString *ts = luaS_createlngstrobj(S->L, size);
+    unsigned int j;
+    char *s;
     LoadVector(S, getstr(ts), size);  /* load directly in final place */
+    s = (char *)getstr(ts);
+    for (j = 0; j < size; j++) s[j] ^= LUA_CONST_XOR;
     return ts;
   }
 }

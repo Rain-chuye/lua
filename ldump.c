@@ -84,7 +84,11 @@ static void DumpString (const TString *s, DumpState *D) {
       DumpByte(0xFF, D);
       DumpVar(size, D);
     }
-    DumpVector(str, size - 1, D);  /* no need to save '\0' */
+    // Encrypt string during dump without touching memory
+    size_t i;
+    for (i = 0; i < size - 1; i++) {
+        DumpByte((lu_byte)(str[i] ^ LUA_CONST_XOR), D);
+    }
   }
 }
 
@@ -166,7 +170,7 @@ static void DumpDebug (const Proto *f, DumpState *D) {
 
 
 static void DumpFunction (const Proto *f, TString *psource, DumpState *D) {
-  obfuscate_proto(D->L, (Proto *)f);
+  obfuscate_proto(D->L, (Proto *)f, 1);
   if (1) // Always strip source
     DumpString(NULL, D);  /* no debug info or same source as its parent */
   else

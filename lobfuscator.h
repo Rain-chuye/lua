@@ -6,15 +6,16 @@
 #include "lobject.h"
 
 /*
-** Obfuscation Keys
+** Commercial Obfuscation Keys
 */
-#define LUA_INST_KEY 0x55555555U
-#define LUA_OP_XOR 0x12U
+#define LUA_INST_KEY  0xAB8271C3U
+#define LUA_OP_XOR    0x1DU
+#define LUA_CONST_XOR 0x8F
 
 #define ENCRYPT_INST(i) ((i) ^ LUA_INST_KEY)
 #define DECRYPT_INST(i) ((i) ^ LUA_INST_KEY)
 
 /* Obfuscator functions */
-void obfuscate_proto(lua_State *L, Proto *f);
+void obfuscate_proto(lua_State *L, Proto *f, int encrypt_strings);
 
 #endif

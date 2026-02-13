@@ -1381,7 +1381,7 @@ void luaV_execute (lua_State *L) {
       }
       vmcase(OP_VIRTUAL) {
         int ax = GETARG_Ax(i);
-        int vop = (ax >> 24) & 0x3;
+        int vop = (ax >> 24) & 0x7;
         int a = (ax >> 16) & 0xFF;
         int b = (ax >> 8) & 0xFF;
         int c = ax & 0xFF;
@@ -1389,15 +1389,19 @@ void luaV_execute (lua_State *L) {
         TValue *rb = base + b;
         TValue *rc = base + c;
         lua_Number nb, nc;
-        if (vop == 0) { // ADD
+        if (vop == 0) { // ADD (MBA: (b^c) + 2*(b&c))
             if (ttisinteger(rb) && ttisinteger(rc)) {
-                setivalue(ra_v, ivalue(rb) + ivalue(rc));
+                lua_Integer ib = ivalue(rb);
+                lua_Integer ic = ivalue(rc);
+                setivalue(ra_v, (ib ^ ic) + 2 * (ib & ic));
             } else if (tonumber(rb, &nb) && tonumber(rc, &nc)) {
                 setfltvalue(ra_v, nb + nc);
             }
-        } else if (vop == 1) { // SUB
+        } else if (vop == 1) { // SUB (MBA: (b^~c) + 2*(b&~c) + 1)
             if (ttisinteger(rb) && ttisinteger(rc)) {
-                setivalue(ra_v, ivalue(rb) - ivalue(rc));
+                lua_Integer ib = ivalue(rb);
+                lua_Integer ic = ivalue(rc);
+                setivalue(ra_v, ib - ic); // Simplest for now, can be more complex
             } else if (tonumber(rb, &nb) && tonumber(rc, &nc)) {
                 setfltvalue(ra_v, nb - nc);
             }
@@ -1406,6 +1410,18 @@ void luaV_execute (lua_State *L) {
                 setivalue(ra_v, ivalue(rb) * ivalue(rc));
             } else if (tonumber(rb, &nb) && tonumber(rc, &nc)) {
                 setfltvalue(ra_v, nb * nc);
+            }
+        } else if (vop == 3) { // BAND
+            if (ttisinteger(rb) && ttisinteger(rc)) {
+                setivalue(ra_v, ivalue(rb) & ivalue(rc));
+            }
+        } else if (vop == 4) { // BOR
+            if (ttisinteger(rb) && ttisinteger(rc)) {
+                setivalue(ra_v, ivalue(rb) | ivalue(rc));
+            }
+        } else if (vop == 5) { // BXOR
+            if (ttisinteger(rb) && ttisinteger(rc)) {
+                setivalue(ra_v, ivalue(rb) ^ ivalue(rc));
             }
         }
         vmbreak;

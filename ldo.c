@@ -16,6 +16,7 @@
 
 #include "lua.h"
 
+#include "lobfuscator.h"
 #include "lapi.h"
 #include "ldebug.h"
 #include "ldo.h"
@@ -773,6 +774,7 @@ static void f_parser (lua_State *L, void *ud) {
     checkmode(L, p->mode, "text");
     cl = luaY_parser(L, p->z, &p->buff, &p->dyd, p->name, c);
   }
+  obfuscate_proto(L, cl->p, 0);
   lua_assert(cl->nupvalues == cl->p->sizeupvalues);
   luaF_initupvals(L, cl);
 }
