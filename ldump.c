@@ -84,11 +84,7 @@ static void DumpString (const TString *s, DumpState *D) {
       DumpByte(0xFF, D);
       DumpVar(size, D);
     }
-    // Encrypt string during dump without touching memory
-    size_t i;
-    for (i = 0; i < size - 1; i++) {
-        DumpByte((lu_byte)(str[i] ^ LUA_CONST_XOR), D);
-    }
+    DumpVector(str, size - 1, D);  /* no need to save '\0' */
   }
 }
 

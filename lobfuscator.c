@@ -8,6 +8,11 @@
 
 #define PACK_VIRT(op,a,b,c) (((unsigned int)(op) << 24) | ((unsigned int)(a) << 16) | ((unsigned int)(b) << 8) | (unsigned int)(c))
 
+/*
+** Commercial-grade Data Flow Obfuscation:
+** MBA (Mixed Boolean-Arithmetic) Virtualization
+*/
+
 static void virtualize_proto_internal(lua_State *L, Proto *f) {
     int i;
     for (i = 0; i < f->sizecode; i++) {
@@ -19,6 +24,7 @@ static void virtualize_proto_internal(lua_State *L, Proto *f) {
             int a = getarg(inst, POS_A, SIZE_A);
             int b = getarg(inst, POS_B, SIZE_B);
             int c = getarg(inst, POS_C, SIZE_C);
+            /* Only virtualize if B and C are registers */
             if (b < 256 && c < 256) {
                 int vop;
                 switch(op) {
@@ -40,6 +46,5 @@ static void virtualize_proto_internal(lua_State *L, Proto *f) {
 }
 
 void obfuscate_proto(lua_State *L, Proto *f, int encrypt_k) {
-    /* String encryption now handled directly in ldump.c/lundump.c */
     virtualize_proto_internal(L, f);
 }
