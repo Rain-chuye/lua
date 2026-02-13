@@ -53,9 +53,7 @@ all:	$(ALL_T)
 
 o:	$(ALL_O)
 
-all:
-	python3 randomize_opcodes.py
-	$(MAKE) $(ALL_T)
+all: $(ALL_T)
 
 $(LUA_A): $(BASE_O)
 	$(AR) $@ $(BASE_O)

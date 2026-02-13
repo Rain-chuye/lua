@@ -86,7 +86,6 @@ enum OpMode {iABC, iABx, iAsBx, iAx};  /* basic instruction format */
 ** the following macros help to manipulate instructions
 */
 
-#define LUA_OP_XOR 0x27
 #include "lobfuscator.h"
 #define GET_OPCODE(i)	(cast(OpCode, (luaP_op_decode[cast(lu_byte, (DECRYPT_INST(i)>>POS_OP) & MASK1(SIZE_OP,0))]) ^ LUA_OP_XOR))
 #define SET_OPCODE(i,o)	((i) = ENCRYPT_INST((((DECRYPT_INST(i))&MASK0(SIZE_OP,POS_OP)) | \
