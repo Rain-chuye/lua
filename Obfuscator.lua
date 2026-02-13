@@ -75,8 +75,7 @@ end
 
 -- [[ Obfuscation Engine ]]
 local function transform(proto)
-    local rev_map, state_map = {}, {}
-    local op_map = {}
+    local op_to_state = {}
     local ops = {}
     for i = 0, 50 do ops[i+1] = i end
     for i = #ops, 2, -1 do
@@ -84,7 +83,7 @@ local function transform(proto)
     end
     for i = 0, 50 do
         local new_op = ops[i+1]
-        op_map[i] = new_op; rev_map[new_op] = i; state_map[i] = math.random(100000, 999999)
+        op_to_state[new_op] = math.random(100000, 999999)
     end
 
     local function crypt(p)
@@ -97,15 +96,12 @@ local function transform(proto)
                 local key = math.random(1, 1000000); k.type = "enc_integer"; k.value = {val = k.value ~ key, key = key}
             end
         end
-        for i = 1, #p.code do
-            local inst = p.code[i]; local op = inst & 0x3F; local rest = inst & ~0x3F
-            p.code[i] = rest | (op_map[op] or op)
-        end
+        -- Opcode randomization is implicitly handled by the dispatcher mapping
         p.source = "=[obfuscated]"; p.line_defined = 0; p.last_line_defined = 0
         for _, sub in ipairs(p.protos) do crypt(sub) end
     end
     crypt(proto)
-    return proto, rev_map, state_map
+    return proto, op_to_state
 end
 
 -- [[ Code Generator ]]
@@ -115,7 +111,7 @@ function Obfuscator.obfuscate(source, intensity)
     if not ok or not func then error("Load Error: " .. tostring(func)) end
     local dump = string.dump(func)
     local proto = create_parser(dump)
-    local obf_proto, rev_map, state_map = transform(proto)
+    local obf_proto, op_to_state = transform(proto)
 
     local function v(name)
         if intensity < 2 then return name end
@@ -125,13 +121,13 @@ function Obfuscator.obfuscate(source, intensity)
     end
 
     local reps = {}
-    local names = {"REGS", "A", "B", "C", "BX", "CODE", "PC", "GETRK", "CU", "TOP", "UNPACK", "STATE", "SBX", "OPENUPS", "CP", "WRAP", "VA", "P", "E", "U", "K", "ARGS", "I", "OP", "OUTER", "REALOP", "REVMAP", "STATEMAP", "ENTRY", "PRX", "UD", "NP", "NU", "F", "RES", "RESC", "RET", "STEP", "IDX", "LIM", "STR", "CV", "OFF", "N", "CAP"}
+    local names = {"REGS", "A", "B", "C", "BX", "CODE", "PC", "GETRK", "CU", "TOP", "UNPACK", "STATE", "SBX", "OPENUPS", "CP", "WRAP", "VA", "P", "E", "U", "K", "ARGS", "I", "OP", "OUTER", "STATE_MAP", "ENTRY", "PRX", "UD", "NP", "NU", "F", "RES", "RESC", "RET", "STEP", "IDX", "LIM", "STR", "CV", "OFF", "N", "CAP", "N_ARGS", "N_RES", "NA", "AX"}
     for _, n in ipairs(names) do reps[n] = v(n) end
 
     local opcodes = {
         [0] = "REGS[A] = REGS[B]",
         [1] = "REGS[A] = GETRK(BX + 256)",
-        [2] = "local ax = (CODE[PC] >> 6) & 0x3FFFFFF; PC = PC + 1; REGS[A] = GETRK(ax + 256)",
+        [2] = "local AX = (CODE[PC] >> 6) & 0x3FFFFFF; PC = PC + 1; REGS[A] = GETRK(AX + 256)",
         [3] = "REGS[A] = (B ~= 0); if C ~= 0 then PC = PC + 1 end",
         [4] = "for i = A, A + B do REGS[i] = nil end",
         [5] = "REGS[A] = CU[B + 1].v",
@@ -165,28 +161,43 @@ function Obfuscator.obfuscate(source, intensity)
         [33] = "if (GETRK(B) <= GETRK(C)) ~= (A ~= 0) then PC = PC + 1 end",
         [34] = "if (not REGS[A]) == (C ~= 0) then PC = PC + 1 end",
         [35] = "if (not REGS[B]) ~= (C ~= 0) then REGS[A] = REGS[B] else PC = PC + 1 end",
-        [36] = "local F, np, nr = REGS[A], B-1, C-1; local CA = {}; if np == -1 then for i=A+1,TOP do CA[#CA+1]=REGS[i] end else for i=1,np do CA[i]=REGS[A+i] end end; local RES, RESC = CAP(F(UNPACK(CA))); if nr == -1 then for i=1,RESC do REGS[A+i-1]=RES[i] end; TOP=A+RESC-1 else for i=1,nr do REGS[A+i-1]=RES[i] end; TOP=A+nr-1 end",
-        [37] = "local F, np = REGS[A], B-1; local CA = {}; if np == -1 then for i=A+1,TOP do CA[#CA+1]=REGS[i] end else for i=1,np do CA[i]=REGS[A+i] end end; return F(UNPACK(CA))",
-        [38] = "local nr = B-1; local RET = {}; if nr == -1 then for i=A,TOP do RET[#RET+1]=REGS[i] end else for i=1,nr do RET[i]=REGS[A+i-1] end end; return UNPACK(RET)",
+        [36] = "local F, RES, RESC; local NA = 0; local CA = {}; if B == 0 then for i = A + 1, TOP do NA = NA + 1; CA[NA] = REGS[i] end else for i = 1, B - 1 do NA = NA + 1; CA[NA] = REGS[A+i] end end; RES, RESC = CAP(REGS[A](UNPACK(CA, 1, NA))); if C == 0 then for i = 1, RESC do REGS[A+i-1] = RES[i] end; TOP = A + RESC - 1 else for i = 1, C - 1 do REGS[A+i-1] = RES[i] end; TOP = A + (C - 1) - 1 end",
+        [37] = "local NA = 0; local CA = {}; if B == 0 then for i = A + 1, TOP do NA = NA + 1; CA[NA] = REGS[i] end else for i = 1, B - 1 do NA = NA + 1; CA[NA] = REGS[A+i] end end; return REGS[A](UNPACK(CA, 1, NA))",
+        [38] = "local RET, n_ret = {}, 0; if B == 0 then for i = A, TOP do n_ret = n_ret + 1; RET[n_ret] = REGS[i] end else for i = 1, B - 1 do n_ret = n_ret + 1; RET[n_ret] = REGS[A+i-1] end end; return UNPACK(RET, 1, n_ret)",
         [39] = "local STEP, LIM = REGS[A+2], REGS[A+1]; local IDX = REGS[A]+STEP; if (STEP>0 and IDX<=LIM) or (STEP<0 and IDX>=LIM) then PC=PC+SBX; REGS[A]=IDX; REGS[A+3]=IDX end",
         [40] = "REGS[A] = REGS[A] - REGS[A+2]; PC = PC + SBX",
         [41] = "local RES, RESC = CAP(REGS[A](REGS[A+1], REGS[A+2])); for i=1,C do REGS[A+3+i-1]=RES[i] end",
         [42] = "if REGS[A+1] ~= nil then REGS[A]=REGS[A+1]; PC=PC+SBX end",
         [43] = "local N, CV = B, C; if N==0 then N=TOP-A end; if CV==0 then CV=(CODE[PC]>>6)&0x3FFFFFF; PC=PC+1 end; local OFF=(CV-1)*50; for i=1,N do REGS[A][OFF+i]=REGS[A+i] end",
         [44] = "local NP, NU = CP.protos[BX+1], {}; for i=1,#NP.upvalues do local UD = NP.upvalues[i]; if UD.instack then local found = false; for _, ENTRY in pairs(OPENUPS) do if ENTRY.idx == UD.idx and not ENTRY.nup.closed then NU[i] = ENTRY.prx; found = true; break end end; if not found then local nup = {v=nil, closed=false}; local prx = setmetatable({}, {__index=function(_,k) if k=='v' then return nup.closed and nup.v or REGS[UD.idx] end end, __newindex=function(_,k,v) if k=='v' then if nup.closed then nup.v=v else REGS[UD.idx]=v end end end}); NU[i]=prx; table.insert(OPENUPS, {idx=UD.idx, nup=nup, prx=prx}) end else NU[i]=CU[UD.idx+1] end end; REGS[A] = WRAP(NP, NU)",
-        [45] = "local N = B-1; if N==-1 then for i=1,#VA do REGS[A+i-1]=VA[i] end; TOP=A+#VA-1 else for i=1,N do REGS[A+i-1]=VA[i] end; TOP=A+N-1 end",
+        [45] = "local N, n_va = B-1, #VA; if N==-1 then for i=1,n_va do REGS[A+i-1]=VA[i] end; TOP=A+n_va-1 else for i=1,N do REGS[A+i-1]=VA[i] end; TOP=A+N-1 end",
         [46] = "PC = PC",
     }
 
-    local branches = ""
-    local keys = {}
-    for k in pairs(opcodes) do table.insert(keys, k) end
-    for i = #keys, 2, -1 do local j = math.random(i); keys[i], keys[j] = keys[j], keys[i] end
-    for i, op in ipairs(keys) do
-        local logic = opcodes[op]:gsub("[%a_][%w_]*", function(m) return reps[m] or m end)
-        branches = branches .. "            " .. (i==1 and "if" or "elseif") .. " " .. reps.STATE .. " == " .. state_map[op] .. " then\n                " .. logic .. "\n"
+    local function build_dispatcher(ops_list, indent)
+        if #ops_list == 1 then
+            local op = ops_list[1]
+            local logic = opcodes[op]:gsub("[%a_][%w_]*", function(m) return reps[m] or m end)
+            return indent .. logic .. "\n"
+        end
+        local mid = math.ceil(#ops_list / 2)
+        local left = {}
+        for i=1, mid do left[i] = ops_list[i] end
+        local right = {}
+        for i=mid+1, #ops_list do right[i-mid] = ops_list[i] end
+
+        local s = indent .. "if " .. reps.STATE .. " <= " .. op_to_state[ops_list[mid]] .. " then\n"
+        s = s .. build_dispatcher(left, indent .. "    ")
+        s = s .. indent .. "else\n"
+        s = s .. build_dispatcher(right, indent .. "    ")
+        s = s .. indent .. "end\n"
+        return s
     end
-    branches = branches .. "            end\n"
+
+    local sorted_ops = {}
+    for op in pairs(opcodes) do table.insert(sorted_ops, op) end
+    table.sort(sorted_ops, function(a, b) return op_to_state[a] < op_to_state[b] end)
+    local dispatcher = build_dispatcher(sorted_ops, "                ")
 
     local vm_template = [=[
 local function OUTER(P, U)
@@ -194,10 +205,11 @@ local function OUTER(P, U)
         return function(...)
             local CODE, K = CP.code, CP.constants
             local PC, REGS, TOP, OPENUPS = 1, {}, 0, {}
-            local ARGS = {...}
+            local function CAP(...) return {...}, select('#', ...) end
+            local ARGS, N_ARGS = CAP(...)
             for i = 0, CP.num_params - 1 do REGS[i] = ARGS[i+1] end
-            local VA = {}
-            if CP.is_vararg ~= 0 then for i = CP.num_params + 1, #ARGS do VA[#VA+1] = ARGS[i] end end
+            local VA, n_va = {}, 0
+            if CP.is_vararg ~= 0 then for i = CP.num_params + 1, N_ARGS do n_va = n_va + 1; VA[n_va] = ARGS[i] end end
             TOP = CP.max_stack_size
             local function GETRK(val)
                 if val >= 256 then
@@ -211,7 +223,6 @@ local function OUTER(P, U)
                 return REGS[val]
             end
             local UNPACK = table.unpack or unpack
-            local function CAP(...) return {...}, select('#', ...) end
             while true do
                 local I = CODE[PC]
                 if not I then break end
@@ -222,9 +233,9 @@ local function OUTER(P, U)
                 local BX = (I >> 14) & 0x3FFFF
                 local SBX = BX - 131071
                 PC = PC + 1
-                local STATE = STATEMAP[REVMAP[OP] or -1]
+                local STATE = STATE_MAP[OP]
                 if STATE then
-]=] .. branches .. [=[
+]=] .. dispatcher .. [=[
                 else break end
             end
         end
@@ -237,15 +248,17 @@ end
     local function serialize(t)
         if type(t) ~= "table" then return type(t) == "string" and string.format("%q", t) or tostring(t) end
         local s = "{"
+        local n = 0
         for k, v in pairs(t) do
             local key = type(k) == "number" and "["..k.."]" or "['"..tostring(k).."']"
             s = s .. key .. "=" .. serialize(v) .. ","
+            n = n + 1
+            if n % 100 == 0 then s = s .. "\n" end
         end
         return s .. "}"
     end
 
-    local output = "local " .. reps.REVMAP .. " = " .. serialize(rev_map) .. "\n"
-    output = output .. "local " .. reps.STATEMAP .. " = " .. serialize(state_map) .. "\n"
+    local output = "local " .. reps.STATE_MAP .. " = " .. serialize(op_to_state) .. "\n"
     output = output .. vm_template .. "\n"
     output = output .. "local proto = " .. serialize(obf_proto) .. "\n"
     output = output .. "return " .. reps.OUTER .. "(proto, {{v=_ENV or _G}})()\n"
