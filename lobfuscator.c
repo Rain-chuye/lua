@@ -30,9 +30,18 @@ static void flatten_2parts(lua_State *L, Proto *f) {
     int oldsize = f->sizecode;
     int mid = oldsize / 2;
 
-    /* Ensure we don't split between a test and a jump */
-    while (mid > 0 && mid < oldsize && testTMode(luaP_opmodes[GET_OPCODE_I(f->code[mid-1])])) {
-        mid++;
+    /* Ensure we don't split between instruction pairs */
+    while (mid > 0 && mid < oldsize) {
+        Instruction inst = f->code[mid - 1];
+        OpCode op = GET_OPCODE_I(inst);
+        int forbidden = 0;
+        if (testTMode(luaP_opmodes[op])) forbidden = 1;
+        else if (op == OP_TFORCALL) forbidden = 1;
+        else if (op == OP_LOADKX) forbidden = 1;
+        else if (op == OP_SETLIST && GETARG_C_I(inst) == 0) forbidden = 1;
+
+        if (forbidden) mid++;
+        else break;
     }
     if (mid >= oldsize - 1) return; /* Too close to end */
 
@@ -113,6 +122,8 @@ void obfuscate_proto(lua_State *L, Proto *f) {
     /* Metadata stripping */
     f->source = luaS_new(L, "=[混淆代码]");
     f->sizelocvars = 0;
+    f->linedefined = 0;
+    f->lastlinedefined = 0;
     if (f->upvalues) {
         for (i = 0; i < f->sizeupvalues; i++) f->upvalues[i].name = NULL;
     }
