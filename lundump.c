@@ -22,7 +22,6 @@
 #include "lstring.h"
 #include "lundump.h"
 #include "lzio.h"
-#include "lobfuscator.h"
 
 
 #if !defined(luai_verifycode)
@@ -31,9 +30,9 @@
 
 
 typedef struct {
-  lua_State *L;
-  ZIO *Z;
-  const char *name;
+    lua_State *L;
+    ZIO *Z;
+    const char *name;
 } LoadState;
 
 
@@ -87,24 +86,21 @@ static lua_Integer LoadInteger (LoadState *S) {
 
 
 static TString *LoadString (LoadState *S) {
-  size_t size = LoadByte(S);
+  //nirenr mod
+  //size_t size = LoadByte(S);
+  unsigned int size = LoadByte(S);
   if (size == 0xFF)
     LoadVar(S, size);
   if (size == 0)
     return NULL;
   else if (--size <= LUAI_MAXSHORTLEN) {  /* short string? */
     char buff[LUAI_MAXSHORTLEN];
-    size_t j;
     LoadVector(S, buff, size);
-    for (j = 0; j < size; j++) buff[j] ^= LUA_CONST_XOR;
     return luaS_newlstr(S->L, buff, size);
   }
   else {  /* long string */
     TString *ts = luaS_createlngstrobj(S->L, size);
-    char *buff = getstr(ts);
-    size_t j;
-    LoadVector(S, buff, size);  /* load directly in final place */
-    for (j = 0; j < size; j++) buff[j] ^= LUA_CONST_XOR;
+    LoadVector(S, getstr(ts), size);  /* load directly in final place */
     return ts;
   }
 }
@@ -132,24 +128,24 @@ static void LoadConstants (LoadState *S, Proto *f) {
     TValue *o = &f->k[i];
     int t = LoadByte(S);
     switch (t) {
-    case LUA_TNIL:
-      setnilvalue(o);
-      break;
-    case LUA_TBOOLEAN:
+      case LUA_TNIL:
+        setnilvalue(o);
+            break;
+      case LUA_TBOOLEAN:
       setbvalue(o, LoadByte(S));
-      break;
-    case LUA_TNUMFLT:
+            break;
+      case LUA_TNUMFLT:
       setfltvalue(o, LoadNumber(S));
-      break;
-    case LUA_TNUMINT:
+            break;
+      case LUA_TNUMINT:
       setivalue(o, LoadInteger(S));
-      break;
-    case LUA_TSHRSTR:
-    case LUA_TLNGSTR:
-      setsvalue2n(S->L, o, LoadString(S));
-      break;
-    default:
-      lua_assert(0);
+            break;
+      case LUA_TSHRSTR:
+      case LUA_TLNGSTR:
+        setsvalue2n(S->L, o, LoadString(S));
+            break;
+      default:
+        lua_assert(0);
     }
   }
 }
@@ -213,7 +209,6 @@ static void LoadFunction (LoadState *S, Proto *f, TString *psource) {
   f->lastlinedefined = LoadInt(S);
   f->numparams = LoadByte(S);
   f->is_vararg = LoadByte(S);
-  f->is_obfuscated = LoadByte(S);
   f->maxstacksize = LoadByte(S);
   LoadCode(S, f);
   LoadConstants(S, f);
@@ -248,7 +243,9 @@ static void checkHeader (LoadState *S) {
     error(S, "format mismatch in");
   checkliteral(S, LUAC_DATA, "corrupted");
   checksize(S, int);
-  checksize(S, size_t);
+  //nirenr mod
+  //checksize(S, size_t);
+  checksize(S, unsigned int);
   checksize(S, Instruction);
   checksize(S, lua_Integer);
   checksize(S, lua_Number);

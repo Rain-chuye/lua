@@ -32,7 +32,6 @@
 #include "lundump.h"
 #include "lvm.h"
 #include "lzio.h"
-#include "lobfuscator.h"
 
 
 
@@ -200,7 +199,7 @@ void luaD_growstack (lua_State *L, int n) {
     if (newsize < needed) newsize = needed;
     if (newsize > LUAI_MAXSTACK) {  /* stack overflow? */
       luaD_reallocstack(L, ERRORSTACKSIZE);
-      luaG_runerror(L, "stack overflow");
+      luaG_runerror(L, "堆栈溢出");
     }
     else
       luaD_reallocstack(L, newsize);
@@ -314,7 +313,7 @@ static void tryfuncTM (lua_State *L, StkId func) {
   const TValue *tm = luaT_gettmbyobj(L, func, TM_CALL);
   StkId p;
   if (!ttisfunction(tm))
-    luaG_typeerror(L, func, "call");
+    luaG_typeerror(L, func, "调用");
   /* Open a hole inside the stack at 'func' */
   for (p = L->top; p > func; p--)
     setobjs2s(L, p, p-1);
@@ -776,7 +775,6 @@ static void f_parser (lua_State *L, void *ud) {
   }
   lua_assert(cl->nupvalues == cl->p->sizeupvalues);
   luaF_initupvals(L, cl);
-  /* obfuscate_proto(L, cl->p, 0); */
 }
 
 

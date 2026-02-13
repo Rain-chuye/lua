@@ -690,7 +690,7 @@ static int capture_to_close (MatchState *ms) {
   int level = ms->level;
   for (level--; level>=0; level--)
     if (ms->capture[level].len == CAP_UNFINISHED) return level;
-  return luaL_error(ms->L, "invalid pattern capture");
+  return luaL_error(ms->L, "无效的模式捕获");
 }
 
 static const char *classend (MatchState *ms, const char *p) {
@@ -870,7 +870,7 @@ static const char *match_capture (MatchState *ms, const char *s, int l) {
 
 static const char *match (MatchState *ms, const char *s, const char *p) {
   if (ms->matchdepth-- == 0)
-    luaL_error(ms->L, "pattern too complex");
+    luaL_error(ms->L, "模式太复杂");
   init: /* using goto's to optimize tail recursion */
   if (p != ms->p_end) {  /* end of pattern? */
     unsigned ch;
@@ -1019,11 +1019,11 @@ static void push_onecapture (MatchState *ms, int i, const char *s,
     if (i == 0)  /* ms->level == 0, too */
       lua_pushlstring(ms->L, s, e - s);  /* add whole match */
     else
-      luaL_error(ms->L, "invalid capture index");
+      luaL_error(ms->L, "无效的捕获索引");
   }
   else {
     ptrdiff_t l = ms->capture[i].len;
-    if (l == CAP_UNFINISHED) luaL_error(ms->L, "unfinished capture");
+    if (l == CAP_UNFINISHED) luaL_error(ms->L, "未完成的捕获");
     if (l == CAP_POSITION) {
       int idx;
       get_index(ms->capture[i].init, ms->src_init, ms->src_end, &idx);

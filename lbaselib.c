@@ -21,6 +21,12 @@
 #include "lualib.h"
 
 
+#ifdef __ANDROID__
+#include <android/log.h>
+#define LOG_TAG "lua"
+#define LOGD(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
+#endif
+
 static int luaB_print (lua_State *L) {
   int n = lua_gettop(L);  /* number of arguments */
   int i;
@@ -36,11 +42,15 @@ static int luaB_print (lua_State *L) {
       return luaL_error(L, "'tostring' must return a string to 'print'");
     if (i>1) lua_writestring("\t", 1);
     lua_writestring(s, l);
+#ifdef __ANDROID__
+	LOGD("%s", s);
+#endif
     lua_pop(L, 1);  /* pop result */
   }
   lua_writeline();
   return 0;
 }
+
 
 
 #define SPACECHARS	" \f\n\r\t\v"
@@ -88,13 +98,40 @@ static int luaB_tonumber (lua_State *L) {
     lua_Integer base = luaL_checkinteger(L, 2);
     luaL_checktype(L, 1, LUA_TSTRING);  /* no numbers as strings */
     s = lua_tolstring(L, 1, &l);
-    luaL_argcheck(L, 2 <= base && base <= 36, 2, "base out of range");
+    luaL_argcheck(L, 2 <= base && base <= 36, 2, "进制超出范围");
     if (b_str2int(s, (int)base, &n) == s + l) {
       lua_pushinteger(L, n);
       return 1;
     }  /* else not a number */
   }  /* else not a number */
   lua_pushnil(L);  /* not a number */
+  return 1;
+}
+
+
+//mod by nirenr
+static int luaB_tointeger (lua_State *L) {
+  if (lua_type(L, 1) == LUA_TNUMBER){
+    if (lua_isinteger(L, 1)) {
+      lua_settop(L, 1);
+      return 1;
+	}
+	else {
+	  lua_Number n = lua_tonumber(L, 1);
+	  lua_pushinteger(L, (lua_Integer)n);
+	  return 1;
+	}
+  }
+  else {
+    size_t l;
+    const char *s = luaL_tolstring(L, 1, &l);
+    if (s != NULL && lua_stringtonumber(L, s) == l + 1) {
+      lua_Number n = lua_tonumber(L, 1);
+	  lua_pushinteger(L, (lua_Integer)n);
+	  return 1;
+	}
+  }
+  lua_pushnil(L);
   return 1;
 }
 
@@ -126,14 +163,36 @@ static int luaB_setmetatable (lua_State *L) {
   int t = lua_type(L, 2);
   luaL_checktype(L, 1, LUA_TTABLE);
   luaL_argcheck(L, t == LUA_TNIL || t == LUA_TTABLE, 2,
-                    "nil or table expected");
+                    "应为 nil 或表");
   if (luaL_getmetafield(L, 1, "__metatable") != LUA_TNIL)
-    return luaL_error(L, "cannot change a protected metatable");
+    return luaL_error(L, "无法更改受保护的元表");
   lua_settop(L, 2);
   lua_setmetatable(L, 1);
   return 1;
 }
 
+//--mod by nirenr
+static int luaB_setmetamethod (lua_State *L) {
+  int t = lua_type(L, 3);
+  luaL_checktype(L, 1, LUA_TTABLE);
+  luaL_argcheck(L, t == LUA_TNIL || t == LUA_TTABLE || t == LUA_TFUNCTION, 2,
+                "应为表、函数或 nil");
+  if (luaL_getmetafield(L, 1, "__metatable") != LUA_TNIL)
+    return luaL_error(L, "无法更改受保护的元表");
+  lua_settop(L, 3);
+  lua_getmetatable(L,1);
+  if(lua_type(L,4)!=LUA_TTABLE){
+    lua_settop(L, 3);
+    lua_newtable(L);
+    lua_setmetatable(L, 1);
+    lua_getmetatable(L, 1);
+  }
+  lua_insert(L,2);
+  lua_settable(L,2);
+    lua_settop(L,1);
+  return 1;
+}
+//---
 
 static int luaB_rawequal (lua_State *L) {
   luaL_checkany(L, 1);
@@ -146,7 +205,7 @@ static int luaB_rawequal (lua_State *L) {
 static int luaB_rawlen (lua_State *L) {
   int t = lua_type(L, 1);
   luaL_argcheck(L, t == LUA_TTABLE || t == LUA_TSTRING, 1,
-                   "table or string expected");
+                   "应为表或字符串");
   lua_pushinteger(L, lua_rawlen(L, 1));
   return 1;
 }
@@ -200,7 +259,12 @@ static int luaB_collectgarbage (lua_State *L) {
 
 static int luaB_type (lua_State *L) {
   int t = lua_type(L, 1);
-  luaL_argcheck(L, t != LUA_TNONE, 1, "value expected");
+  luaL_argcheck(L, t != LUA_TNONE, 1, "缺少值");
+  if (luaL_callmeta(L, 1, "__type")){
+    //lua_pushstring(L, lua_typename(L, t));
+    //lua_pushvalue(L,-2);
+    return 1;
+  }
   lua_pushstring(L, lua_typename(L, t));
   return 1;
 }
@@ -316,7 +380,7 @@ static int luaB_loadfile (lua_State *L) {
 */
 static const char *generic_reader (lua_State *L, void *ud, size_t *size) {
   (void)(ud);  /* not used */
-  luaL_checkstack(L, 2, "too many nested functions");
+  luaL_checkstack(L, 2, "嵌套函数过多");
   lua_pushvalue(L, 1);  /* get function */
   lua_call(L, 0, 1);  /* call it */
   if (lua_isnil(L, -1)) {
@@ -325,7 +389,7 @@ static const char *generic_reader (lua_State *L, void *ud, size_t *size) {
     return NULL;
   }
   else if (!lua_isstring(L, -1))
-    luaL_error(L, "reader function must return a string");
+    luaL_error(L, "读取函数必须返回字符串");
   lua_replace(L, RESERVEDSLOT);  /* save string in reserved slot */
   return lua_tolstring(L, RESERVEDSLOT, size);
 }
@@ -350,6 +414,16 @@ static int luaB_load (lua_State *L) {
   return load_aux(L, status, env);
 }
 
+static int luaB_loadstring (lua_State *L) {
+  int status;
+  size_t l;
+  const char *s = luaL_checklstring(L, 1, &l);
+  const char *mode = luaL_optstring(L, 3, "bt");
+  int env = (!lua_isnone(L, 4) ? 4 : 0);  /* 'env' index or 0 if no 'env' */
+  const char *chunkname = luaL_optstring(L, 2, s);
+  status = luaL_loadbufferx(L, s, l, chunkname, mode);
+  return load_aux(L, status, env);
+}
 /* }====================================================== */
 
 
@@ -375,7 +449,7 @@ static int luaB_assert (lua_State *L) {
   else {  /* error */
     luaL_checkany(L, 1);  /* there must be a condition */
     lua_remove(L, 1);  /* remove it */
-    lua_pushliteral(L, "assertion failed!");  /* default message */
+    lua_pushliteral(L, "断言失败！");  /* default message */
     lua_settop(L, 1);  /* leave only message (default if no other one) */
     return luaB_error(L);  /* call 'error' */
   }
@@ -392,7 +466,7 @@ static int luaB_select (lua_State *L) {
     lua_Integer i = luaL_checkinteger(L, 1);
     if (i < 0) i = n + i;
     else if (i > n) i = n;
-    luaL_argcheck(L, 1 <= i, 1, "index out of range");
+    luaL_argcheck(L, 1 <= i, 1, "索引超出范围");
     return n - (int)i;
   }
 }
@@ -450,17 +524,34 @@ static int luaB_tostring (lua_State *L) {
 }
 
 
+/* compatibility with old module system */
+#if defined(LUA_COMPAT_MODULE)
+static int findtable (lua_State *L) {
+  if (lua_gettop(L)==1){
+    lua_pushglobaltable(L);
+    lua_insert(L, 1);
+  }
+  luaL_checktype(L, 1, LUA_TTABLE);
+  const char *name = luaL_checklstring(L, 2, 0);
+  lua_pushstring(L, luaL_findtable(L, 1, name, 0));
+  return 2;
+}
+#endif
+
 static const luaL_Reg base_funcs[] = {
   {"assert", luaB_assert},
   {"collectgarbage", luaB_collectgarbage},
   {"dofile", luaB_dofile},
   {"error", luaB_error},
+#if defined(LUA_COMPAT_MODULE)
+  {"findtable", findtable},
+#endif
   {"getmetatable", luaB_getmetatable},
   {"ipairs", luaB_ipairs},
   {"loadfile", luaB_loadfile},
   {"load", luaB_load},
 #if defined(LUA_COMPAT_LOADSTRING)
-  {"loadstring", luaB_load},
+  {"loadstring", luaB_loadstring},
 #endif
   {"next", luaB_next},
   {"pairs", luaB_pairs},
@@ -472,6 +563,8 @@ static const luaL_Reg base_funcs[] = {
   {"rawset", luaB_rawset},
   {"select", luaB_select},
   {"setmetatable", luaB_setmetatable},
+  {"setmetamethod", luaB_setmetamethod},
+  {"tointeger", luaB_tointeger},
   {"tonumber", luaB_tonumber},
   {"tostring", luaB_tostring},
   {"type", luaB_type},

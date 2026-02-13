@@ -38,12 +38,13 @@
 
 /* ORDER RESERVED */
 static const char *const luaX_tokens [] = {
-    "and", "break", "do", "else", "elseif",
+    "and", "break", "case", "continue", "default", "defer", "do", "else", "elseif",
     "end", "false", "for", "function", "goto", "if",
-    "in", "local", "nil", "not", "or", "repeat",
-    "return", "then", "true", "until", "while",
+    "in", "lambda", "local", "nil", "not", "or", "repeat",
+    "return", "switch", "then", "true", "until", "when", "while",
     "//", "..", "...", "==", ">=", "<=", "~=",
     "<<", ">>", "::", "<eof>",
+    "->", "=>",
     "<number>", "<integer>", "<name>", "<string>"
 };
 
@@ -309,10 +310,16 @@ static void esccheck (LexState *ls, int c, const char *msg) {
 }
 
 
+
 static int gethexa (LexState *ls) {
   save_and_next(ls);
   esccheck (ls, lisxdigit(ls->current), "hexadecimal digit expected");
   return luaO_hexavalue(ls->current);
+}
+
+static int gethexa2 (LexState *ls) {
+    esccheck (ls, lisxdigit(ls->current), "hexadecimal digit expected");
+    return luaO_hexavalue(ls->current);
 }
 
 
@@ -323,24 +330,41 @@ static int readhexaesc (LexState *ls) {
   return r;
 }
 
-
 static unsigned long readutf8esc (LexState *ls) {
   unsigned long r;
   int i = 4;  /* chars to be removed: '\', 'u', '{', and first digit */
   save_and_next(ls);  /* skip 'u' */
-  esccheck(ls, ls->current == '{', "missing '{'");
-  r = gethexa(ls);  /* must have at least one digit */
+  //esccheck(ls, ls->current == '{', "missing '{'");
+  //r = gethexa(ls);  /* must have at least one digit */
+  int m=ls->current == '{';
+  if(!m)
+    i=3;
+  if(m)
+    r = gethexa(ls);  /* must have at least one digit */
+  else
+    r = gethexa2(ls);  /* must have at least one digit */
+//---
   while ((save_and_next(ls), lisxdigit(ls->current))) {
     i++;
+    esccheck(ls, r <= (0x7FFFFFFFu >> 4), "UTF-8 value too large");
     r = (r << 4) + luaO_hexavalue(ls->current);
-    esccheck(ls, r <= 0x10FFFF, "UTF-8 value too large");
+//mod by nirenr
+    if(!m&&i==8){
+      save_and_next(ls);
+      break;
+    }
+//---
   }
-  esccheck(ls, ls->current == '}', "missing '}'");
-  next(ls);  /* skip '}' */
+  //esccheck(ls, ls->current == '}', "missing '}'");
+  //next(ls);  /* skip '}' */
+  //mod by nirenr
+  if(m){
+    esccheck(ls, ls->current == '}', "missing '}'");
+    next(ls);  /* skip '}' */
+  }
   luaZ_buffremove(ls->buff, i);  /* remove saved chars from buffer */
   return r;
 }
-
 
 static void utf8esc (LexState *ls) {
   char buff[UTF8BUFFSZ];
@@ -368,11 +392,11 @@ static void read_string (LexState *ls, int del, SemInfo *seminfo) {
   while (ls->current != del) {
     switch (ls->current) {
       case EOZ:
-        lexerror(ls, "unfinished string", TK_EOS);
+        lexerror(ls, "未完成的字符串", TK_EOS);
         break;  /* to avoid warnings */
       case '\n':
       case '\r':
-        lexerror(ls, "unfinished string", TK_STRING);
+        lexerror(ls, "未完成的字符串", TK_STRING);
         break;  /* to avoid warnings */
       case '\\': {  /* escape sequences */
         int c;  /* final character to be saved */
@@ -440,6 +464,7 @@ static int llex (LexState *ls, SemInfo *seminfo) {
       }
       case '-': {  /* '-' or '--' (comment) */
         next(ls);
+        if (check_next1(ls, '>')) return TK_LET;//mod by nirenr
         if (ls->current != '-') return '-';
         /* else is a comment */
         next(ls);
@@ -470,6 +495,7 @@ static int llex (LexState *ls, SemInfo *seminfo) {
       case '=': {
         next(ls);
         if (check_next1(ls, '=')) return TK_EQ;
+        if (check_next1(ls, '>')) return TK_MEAN;//mod by nirenr
         else return '=';
       }
       case '<': {
@@ -489,6 +515,31 @@ static int llex (LexState *ls, SemInfo *seminfo) {
         if (check_next1(ls, '/')) return TK_IDIV;
         else return '/';
       }
+//mod by nirenr
+      case '!': {
+        next(ls);
+        if (check_next1(ls, '=')) return TK_NE;
+        else return TK_NOT;
+      }
+      case '@': {
+        next(ls);
+        return TK_DBCOLON;
+      }
+      case '$': {
+        next(ls);
+        return TK_LOCAL;
+      }
+      case '&': {
+         next(ls);
+         if (check_next1(ls, '&')) return TK_AND;
+         return '&';
+      }
+      case '|': {
+         next(ls);
+         if (check_next1(ls, '|')) return TK_OR;
+         return '|';
+      }
+//---
       case '~': {
         next(ls);
         if (check_next1(ls, '=')) return TK_NE;
@@ -512,6 +563,10 @@ static int llex (LexState *ls, SemInfo *seminfo) {
         }
         else if (!lisdigit(ls->current)) return '.';
         else return read_numeral(ls, seminfo);
+      }
+      case '\\': {
+        next(ls);
+        return TK_LAMBDA;
       }
       case '0': case '1': case '2': case '3': case '4':
       case '5': case '6': case '7': case '8': case '9': {

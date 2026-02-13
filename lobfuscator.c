@@ -4,56 +4,136 @@
 #include "lmem.h"
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 
 static void virtualize_proto_internal(Proto *f) {
     int i;
     for (i = 0; i < f->sizecode; i++) {
         Instruction *pi = &f->code[i];
-        OpCode op = GET_OPCODE(*pi);
+        OpCode op = GET_OPCODE_I(*pi);
 
         switch (op) {
-            case OP_ADD: SET_OPCODE(*pi, OP_VADD); break;
-            case OP_SUB: SET_OPCODE(*pi, OP_VSUB); break;
-            case OP_MUL: SET_OPCODE(*pi, OP_VMUL); break;
-            case OP_BAND: SET_OPCODE(*pi, OP_VAND); break;
-            case OP_BOR: SET_OPCODE(*pi, OP_VOR); break;
-            case OP_BXOR: SET_OPCODE(*pi, OP_VXOR); break;
+            case OP_ADD: SET_OPCODE_I(*pi, OP_VADD); break;
+            case OP_SUB: SET_OPCODE_I(*pi, OP_VSUB); break;
+            case OP_MUL: SET_OPCODE_I(*pi, OP_VMUL); break;
+            case OP_BAND: SET_OPCODE_I(*pi, OP_VAND); break;
+            case OP_BOR: SET_OPCODE_I(*pi, OP_VOR); break;
+            case OP_BXOR: SET_OPCODE_I(*pi, OP_VXOR); break;
             default: break;
         }
     }
 }
 
-void obfuscate_proto(lua_State *L, Proto *f, int is_dumping) {
+static void flatten_2parts(lua_State *L, Proto *f) {
+    if (f->sizecode < 6 || f->sizecode > 1000) return;
+
+    int oldsize = f->sizecode;
+    int mid = oldsize / 2;
+
+    /* Ensure we don't split between a test and a jump */
+    while (mid > 0 && mid < oldsize && testTMode(luaP_opmodes[GET_OPCODE_I(f->code[mid-1])])) {
+        mid++;
+    }
+    if (mid >= oldsize - 1) return; /* Too close to end */
+
+    int newsize = oldsize + 3;
+    Instruction *nc = luaM_newvector(L, newsize, Instruction);
+    int *old_to_new = (int *)malloc((oldsize + 1) * sizeof(int));
+
+    int i;
+    int n2 = oldsize - mid;
+    /*
+    ** New Layout:
+    ** 0: JMP to Part 1 (nc[n2+2])
+    ** 1 .. n2: Part 2 (orig [mid .. oldsize-1])
+    ** n2+1: JMP to End (nc[newsize])
+    ** n2+2 .. oldsize+1: Part 1 (orig [0 .. mid-1])
+    ** oldsize+2: JMP to Part 2 (nc[1])
+    */
+    for (i = 0; i < mid; i++) old_to_new[i] = i + n2 + 2;
+    for (i = mid; i < oldsize; i++) old_to_new[i] = i - mid + 1;
+    old_to_new[oldsize] = newsize;
+
+    /* nc[0] jumps to nc[old_to_new[0]] */
+    Instruction j_start = 0;
+    SET_OPCODE_I(j_start, OP_JMP);
+    SETARG_sBx_I(j_start, old_to_new[0] - (0 + 1));
+    nc[0] = j_start;
+
+    /* Copy Part 2 */
+    for (i = mid; i < oldsize; i++) nc[old_to_new[i]] = f->code[i];
+
+    /* Jump from end of Part 2 to End */
+    Instruction j_end = 0;
+    SET_OPCODE_I(j_end, OP_JMP);
+    SETARG_sBx_I(j_end, newsize - (n2 + 1 + 1));
+    nc[n2 + 1] = j_end;
+
+    /* Copy Part 1 */
+    for (i = 0; i < mid; i++) nc[old_to_new[i]] = f->code[i];
+
+    /* Jump from end of Part 1 to start of Part 2 */
+    Instruction j_p2 = 0;
+    SET_OPCODE_I(j_p2, OP_JMP);
+    SETARG_sBx_I(j_p2, old_to_new[mid] - (oldsize + 2 + 1));
+    nc[oldsize + 2] = j_p2;
+
+    /* Fix all relative jumps */
+    for (i = 0; i < newsize; i++) {
+        Instruction d = nc[i];
+        OpCode op = GET_OPCODE_I(d);
+        if (op == OP_JMP || op == OP_FORLOOP || op == OP_FORPREP || op == OP_TFORLOOP) {
+            int orig_pc = -1;
+            int k;
+            for (k = 0; k <= oldsize; k++) {
+                if (old_to_new[k] == i) { orig_pc = k; break; }
+            }
+            if (orig_pc != -1) {
+                int offset = GETARG_sBx_I(d);
+                int orig_target = orig_pc + 1 + offset;
+                if (orig_target >= 0 && orig_target <= oldsize) {
+                    int new_target = old_to_new[orig_target];
+                    int new_offset = new_target - (i + 1);
+                    SETARG_sBx_I(nc[i], new_offset);
+                }
+            }
+        }
+    }
+
+    luaM_freearray(L, f->code, oldsize);
+    f->code = nc;
+    f->sizecode = newsize;
+    free(old_to_new);
+}
+
+void obfuscate_proto(lua_State *L, Proto *f) {
     int i;
     if (f->is_obfuscated) return;
+
+    /* Metadata stripping */
+    f->source = luaS_new(L, "=[混淆代码]");
+    f->sizelocvars = 0;
+    if (f->upvalues) {
+        for (i = 0; i < f->sizeupvalues; i++) f->upvalues[i].name = NULL;
+    }
+    f->sizelineinfo = 0;
+    f->lineinfo = NULL;
+
+    /* Decrypt for processing */
+    for (i = 0; i < f->sizecode; i++) f->code[i] = DECRYPT_INST(f->code[i]);
 
     /* Instruction Virtualization */
     virtualize_proto_internal(f);
 
-    /* Metadata Stripping */
-    f->source = luaS_new(L, "=[obfuscated]");
-    if (f->locvars) {
-        for (i = 0; i < f->sizelocvars; i++) {
-            f->locvars[i].varname = luaS_new(L, "");
-        }
-    }
-    if (f->upvalues) {
-        for (i = 0; i < f->sizeupvalues; i++) {
-            f->upvalues[i].name = luaS_new(L, "");
-        }
-    }
-    if (f->lineinfo) {
-        for (i = 0; i < f->sizelineinfo; i++) f->lineinfo[i] = 0;
-    }
+    /* Flattening */
+    flatten_2parts(L, f);
 
-    /* Control Flow Obfuscation (Light)
-       OpCode Randomization and Instruction Encryption already provide
-       significant control flow obfuscation by hiding the instruction types.
-    */
-
-    for (i = 0; i < f->sizep; i++) {
-        obfuscate_proto(L, f->p[i], is_dumping);
-    }
+    /* Re-encrypt */
+    for (i = 0; i < f->sizecode; i++) f->code[i] = ENCRYPT_INST(f->code[i]);
 
     f->is_obfuscated = 1;
+
+    for (i = 0; i < f->sizep; i++) {
+        obfuscate_proto(L, f->p[i]);
+    }
 }

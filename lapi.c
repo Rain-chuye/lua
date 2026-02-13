@@ -121,7 +121,7 @@ LUA_API void lua_xmove (lua_State *from, lua_State *to, int n) {
   lua_lock(to);
   api_checknelems(from, n);
   api_check(from, G(from) == G(to), "moving among independent states");
-  api_check(from, to->ci->top - to->top >= n, "stack overflow");
+  api_check(from, to->ci->top - to->top >= n, "堆栈溢出");
   from->top -= n;
   for (i = 0; i < n; i++) {
     setobj2s(to, to->top, from->top + i);
@@ -436,8 +436,12 @@ LUA_API const void *lua_topointer (lua_State *L, int idx) {
     case LUA_TTHREAD: return thvalue(o);
     case LUA_TUSERDATA: return getudatamem(uvalue(o));
     case LUA_TLIGHTUSERDATA: return pvalue(o);
+    case LUA_TSTRING: return svalue(o);
     default: return NULL;
   }
+}
+LUA_API const void *lua_toluaobject (lua_State *L, int idx) {
+    return index2addr(L, idx);
 }
 
 
@@ -533,6 +537,7 @@ LUA_API void lua_pushcclosure (lua_State *L, lua_CFunction fn, int n) {
   lua_lock(L);
   if (n == 0) {
     setfvalue(L->top, fn);
+    api_incr_top(L);
   }
   else {
     CClosure *cl;
@@ -546,9 +551,11 @@ LUA_API void lua_pushcclosure (lua_State *L, lua_CFunction fn, int n) {
       /* does not need barrier because closure is white */
     }
     setclCvalue(L, L->top, cl);
+    api_incr_top(L);
+    luaC_checkGC(L);
   }
-  api_incr_top(L);
-  luaC_checkGC(L);
+  //api_incr_top(L);
+  //luaC_checkGC(L);
   lua_unlock(L);
 }
 
@@ -804,14 +811,36 @@ LUA_API void lua_rawset (lua_State *L, int idx) {
   api_checknelems(L, 2);
   o = index2addr(L, idx);
   api_check(L, ttistable(o), "table expected");
-  slot = luaH_set(L, hvalue(o), L->top - 2);
+  Table *t=hvalue(o);
+  if(t->type==2)
+    luaG_runerror(L, "常量表不可设置");
+  else if(t->type==3)
+    luaG_runerror(L, "const array cannot be set");
+  slot = luaH_set(L, t, L->top - 2);
   setobj2t(L, slot, L->top - 1);
-  invalidateTMcache(hvalue(o));
-  luaC_barrierback(L, hvalue(o), L->top-1);
+  invalidateTMcache(t);
+  luaC_barrierback(L, t, L->top-1);
   L->top -= 2;
   lua_unlock(L);
 }
 
+//mod by nirenr
+LUA_API void lua_const (lua_State *L, int idx) {
+  StkId o;
+  lua_lock(L);
+  api_checknelems(L, 2);
+  o = index2addr(L, idx);
+  api_check(L, ttistable(o), "table expected");
+  if(hvalue(o)->type==1)
+    hvalue(o)->type=3;
+  else
+    hvalue(o)->type=2;
+  sethvalue(L, L->top, hvalue(o));  /* anchor it */
+  invalidateTMcache(hvalue(o));
+  luaC_barrierback(L, hvalue(o), L->top);
+  lua_unlock(L);
+}
+//---
 
 LUA_API void lua_rawseti (lua_State *L, int idx, lua_Integer n) {
   StkId o;
@@ -819,7 +848,12 @@ LUA_API void lua_rawseti (lua_State *L, int idx, lua_Integer n) {
   api_checknelems(L, 1);
   o = index2addr(L, idx);
   api_check(L, ttistable(o), "table expected");
-  luaH_setint(L, hvalue(o), n, L->top - 1);
+  Table *t=hvalue(o);
+  if(t->type==2)
+    luaG_runerror(L, "常量表不可设置");
+  else if(t->type==3)
+    luaG_runerror(L, "const array cannot be set");
+  luaH_setint(L, t, n, L->top - 1);
   luaC_barrierback(L, hvalue(o), L->top-1);
   L->top--;
   lua_unlock(L);
@@ -834,7 +868,12 @@ LUA_API void lua_rawsetp (lua_State *L, int idx, const void *p) {
   o = index2addr(L, idx);
   api_check(L, ttistable(o), "table expected");
   setpvalue(&k, cast(void *, p));
-  slot = luaH_set(L, hvalue(o), &k);
+  Table *t=hvalue(o);
+  if(t->type==2)
+    luaG_runerror(L, "常量表不可设置");
+  else if(t->type==3)
+    luaG_runerror(L, "const array cannot be set");
+  slot = luaH_set(L, t, &k);
   setobj2t(L, slot, L->top - 1);
   luaC_barrierback(L, hvalue(o), L->top - 1);
   L->top--;
@@ -942,6 +981,11 @@ static void f_call (lua_State *L, void *ud) {
   luaD_callnoyield(L, c->func, c->nresults);
 }
 
+#ifdef __ANDROID__
+#include <android/log.h>
+#define LOG_TAG "lua"
+#define LOGD(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
+#endif
 
 
 LUA_API int lua_pcallk (lua_State *L, int nargs, int nresults, int errfunc,

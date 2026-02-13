@@ -565,13 +565,13 @@ static const char *varinfo (lua_State *L, const TValue *o) {
 
 l_noret luaG_typeerror (lua_State *L, const TValue *o, const char *op) {
   const char *t = luaT_objtypename(L, o);
-  luaG_runerror(L, "attempt to %s a %s value%s", op, t, varinfo(L, o));
+  luaG_runerror(L, "尝试%s一个%s值%s", op, t, varinfo(L, o));
 }
 
 
 l_noret luaG_concaterror (lua_State *L, const TValue *p1, const TValue *p2) {
   if (ttisstring(p1) || cvt2str(p1)) p1 = p2;
-  luaG_typeerror(L, p1, "concatenate");
+  luaG_typeerror(L, p1, "连接");
 }
 
 
@@ -591,7 +591,7 @@ l_noret luaG_tointerror (lua_State *L, const TValue *p1, const TValue *p2) {
   lua_Integer temp;
   if (!tointeger(p1, &temp))
     p2 = p1;
-  luaG_runerror(L, "number%s has no integer representation", varinfo(L, p2));
+  luaG_runerror(L, "数值%s无法表示为整数", varinfo(L, p2));
 }
 
 
@@ -599,9 +599,9 @@ l_noret luaG_ordererror (lua_State *L, const TValue *p1, const TValue *p2) {
   const char *t1 = luaT_objtypename(L, p1);
   const char *t2 = luaT_objtypename(L, p2);
   if (strcmp(t1, t2) == 0)
-    luaG_runerror(L, "attempt to compare two %s values", t1);
+    luaG_runerror(L, "尝试比较两个 %s 值", t1);
   else
-    luaG_runerror(L, "attempt to compare %s with %s", t1, t2);
+    luaG_runerror(L, "尝试将 %s 与 %s 比较", t1, t2);
 }
 
 

@@ -22,7 +22,7 @@
 #include "lstring.h"
 
 
-#define MEMERRMSG       "not enough memory"
+#define MEMERRMSG       "内存不足"
 
 
 /*

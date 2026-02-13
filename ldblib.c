@@ -34,7 +34,7 @@ static const int HOOKKEY = 0;
 */
 static void checkstack (lua_State *L, lua_State *L1, int n) {
   if (L != L1 && !lua_checkstack(L1, n))
-    luaL_error(L, "stack overflow");
+    luaL_error(L, "堆栈溢出");
 }
 
 
@@ -56,7 +56,7 @@ static int db_getmetatable (lua_State *L) {
 static int db_setmetatable (lua_State *L) {
   int t = lua_type(L, 2);
   luaL_argcheck(L, t == LUA_TNIL || t == LUA_TTABLE, 2,
-                    "nil or table expected");
+                    "应为 nil 或表");
   lua_settop(L, 2);
   lua_setmetatable(L, 1);
   return 1;  /* return 1st argument */
@@ -241,7 +241,33 @@ static int db_setlocal (lua_State *L) {
   return 1;
 }
 
-
+static int db_getfenv (lua_State *L) {
+  lua_Debug ar;
+  const char *name;
+  int nvar = 1;  /* local-variable index */
+  /* stack-level argument */
+    int level = (int)luaL_checkinteger(L, 1);
+    if (!lua_getstack(L, level, &ar))  /* out of range? */
+      return luaL_argerror(L, 1, "level out of range");
+    lua_getinfo(L, "u", &ar);
+    name = lua_getlocal(L, &ar, nvar + ar.nparams);
+    if (name)
+        return 1;
+    return 1;
+}
+static int db_setfenv (lua_State *L) {
+    lua_Debug ar;
+    const char *name;
+    int nvar = 1;  /* local-variable index */
+    /* stack-level argument */
+    int level = (int)luaL_checkinteger(L, 1);
+    luaL_checktype(L,2,LUA_TTABLE);
+    if (!lua_getstack(L, level, &ar))  /* out of range? */
+        return luaL_argerror(L, 1, "level out of range");
+    lua_getinfo(L, "u", &ar);
+    lua_setlocal(L, &ar, nvar + ar.nparams);
+    return 0;
+}
 /*
 ** get (if 'get' is true) or set an upvalue from a closure
 */
@@ -432,6 +458,8 @@ static const luaL_Reg dblib[] = {
   {"debug", db_debug},
   {"getuservalue", db_getuservalue},
   {"gethook", db_gethook},
+  {"getfenv", db_getfenv},
+  {"setfenv", db_setfenv},
   {"getinfo", db_getinfo},
   {"getlocal", db_getlocal},
   {"getregistry", db_getregistry},

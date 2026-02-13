@@ -121,6 +121,8 @@ typedef struct lua_TValue {
 
 
 #define val_(o)		((o)->value_)
+/* convert a 'StackValue' to a 'TValue' */
+#define s2v(o)	((o)->value_)
 
 
 /* raw type tag of a TValue */
@@ -306,7 +308,7 @@ typedef struct TString {
   lu_byte shrlen;  /* length for short strings */
   unsigned int hash;
   union {
-    size_t lnglen;  /* length for long strings */
+    unsigned int lnglen;  /* length for long strings */
     struct TString *hnext;  /* linked list for hash table */
   } u;
 } TString;
@@ -505,6 +507,7 @@ typedef struct Table {
   Node *lastfree;  /* any free position is before this position */
   struct Table *metatable;
   GCObject *gclist;
+  lu_byte type;
 } Table;
 
 

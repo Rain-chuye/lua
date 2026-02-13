@@ -101,7 +101,7 @@ static void pushfuncname (lua_State *L, lua_Debug *ar) {
   else if (*ar->namewhat != '\0')  /* is there a name from code? */
     lua_pushfstring(L, "%s '%s'", ar->namewhat, ar->name);  /* use it */
   else if (*ar->what == 'm')  /* main? */
-      lua_pushliteral(L, "main chunk");
+      lua_pushliteral(L, "主块");
   else if (*ar->what != 'C')  /* for Lua functions, use <file:line> */
     lua_pushfstring(L, "function <%s:%d>", ar->short_src, ar->linedefined);
   else  /* nothing left... */
@@ -166,7 +166,7 @@ LUALIB_API void luaL_traceback (lua_State *L, lua_State *L1,
 LUALIB_API int luaL_argerror (lua_State *L, int arg, const char *extramsg) {
   lua_Debug ar;
   if (!lua_getstack(L, 0, &ar))  /* no stack frame? */
-    return luaL_error(L, "bad argument #%d (%s)", arg, extramsg);
+    return luaL_error(L, "参数 #%d 错误 (%s)", arg, extramsg);
   lua_getinfo(L, "n", &ar);
   if (strcmp(ar.namewhat, "method") == 0) {
     arg--;  /* do not count 'self' */
@@ -176,7 +176,7 @@ LUALIB_API int luaL_argerror (lua_State *L, int arg, const char *extramsg) {
   }
   if (ar.name == NULL)
     ar.name = (pushglobalfuncname(L, &ar)) ? lua_tostring(L, -1) : "?";
-  return luaL_error(L, "bad argument #%d to '%s' (%s)",
+  return luaL_error(L, "函数 '%s' 的参数 #%d 错误 (%s)",
                         arg, ar.name, extramsg);
 }
 
@@ -190,7 +190,7 @@ static int typeerror (lua_State *L, int arg, const char *tname) {
     typearg = "light userdata";  /* special name for messages */
   else
     typearg = luaL_typename(L, arg);  /* standard name */
-  msg = lua_pushfstring(L, "%s expected, got %s", tname, typearg);
+  msg = lua_pushfstring(L, "应为 %s，得到 %s", tname, typearg);
   return luaL_argerror(L, arg, msg);
 }
 
@@ -220,7 +220,7 @@ LUALIB_API void luaL_where (lua_State *L, int level) {
 /*
 ** Again, the use of 'lua_pushvfstring' ensures this function does
 ** not need reserved stack space when called. (At worst, it generates
-** an error with "stack overflow" instead of the given message.)
+** an error with "堆栈溢出" instead of the given message.)
 */
 LUALIB_API int luaL_error (lua_State *L, const char *fmt, ...) {
   va_list argp;
@@ -372,7 +372,7 @@ LUALIB_API void luaL_checkstack (lua_State *L, int space, const char *msg) {
     if (msg)
       luaL_error(L, "stack overflow (%s)", msg);
     else
-      luaL_error(L, "stack overflow");
+      luaL_error(L, "堆栈溢出");
   }
 }
 
@@ -385,7 +385,7 @@ LUALIB_API void luaL_checktype (lua_State *L, int arg, int t) {
 
 LUALIB_API void luaL_checkany (lua_State *L, int arg) {
   if (lua_type(L, arg) == LUA_TNONE)
-    luaL_argerror(L, arg, "value expected");
+    luaL_argerror(L, arg, "缺少值");
 }
 
 
@@ -423,7 +423,7 @@ LUALIB_API lua_Number luaL_optnumber (lua_State *L, int arg, lua_Number def) {
 
 static void interror (lua_State *L, int arg) {
   if (lua_isnumber(L, arg))
-    luaL_argerror(L, arg, "number has no integer representation");
+    luaL_argerror(L, arg, "数值无法表示为整数");
   else
     tag_error(L, arg, LUA_TNUMBER);
 }
@@ -959,7 +959,7 @@ LUALIB_API void luaL_openlib (lua_State *L, const char *libname,
 ** Returns with only the table at the stack.
 */
 LUALIB_API void luaL_setfuncs (lua_State *L, const luaL_Reg *l, int nup) {
-  luaL_checkstack(L, nup, "too many upvalues");
+  luaL_checkstack(L, nup, "upvalue 过多");
   for (; l->name != NULL; l++) {  /* fill the table with given functions */
     int i;
     for (i = 0; i < nup; i++)  /* copy upvalues to the top */

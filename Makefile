@@ -53,7 +53,7 @@ all:	$(ALL_T)
 
 o:	$(ALL_O)
 
-all: $(ALL_T)
+a:	$(ALL_A)
 
 $(LUA_A): $(BASE_O)
 	$(AR) $@ $(BASE_O)

@@ -82,7 +82,6 @@ enum OpMode {iABC, iABx, iAsBx, iAx};  /* basic instruction format */
 /* creates a mask with 'n' 0 bits at position 'p' */
 #define MASK0(n,p)	(~MASK1(n,p))
 
-
 /*
 ** invalid register that fits in 8 bits
 */
@@ -167,13 +166,15 @@ OP_CLOSURE,/*	A Bx	R(A) := closure(KPROTO[Bx])			*/
 OP_VARARG,/*	A B	R(A), R(A+1), ..., R(A+B-2) = vararg		*/
 
 OP_EXTRAARG,/*	Ax	extra (larger) argument for previous opcode	*/
-/* Virtualized Opcodes */
-OP_VADD,
-OP_VSUB,
-OP_VMUL,
-OP_VAND,
-OP_VOR,
-OP_VXOR
+OP_TBC,
+OP_NEWARRAY,/*	A B C	R(A) := {} (size = B,C)				*/
+    OP_TFOREACH, /*	A C	R(A+3), ... ,R(A+2+C) := R(A)(R(A+1), R(A+2));	*/
+    OP_VADD,
+    OP_VSUB,
+    OP_VMUL,
+    OP_VAND,
+    OP_VOR,
+    OP_VXOR
 } OpCode;
 
 
@@ -185,46 +186,80 @@ OP_VXOR
 
 #include "lobfuscator.h"
 
-#define GET_OPCODE(i)	(cast(OpCode, (((DECRYPT_INST(i))>>POS_OP) & MASK1(SIZE_OP,0)) ^ LUA_OP_XOR))
-#define SET_OPCODE(i,o)	((i) = ENCRYPT_INST(((DECRYPT_INST(i))&MASK0(SIZE_OP,POS_OP)) | \
-		((cast(Instruction, (o) ^ LUA_OP_XOR) & MASK1(SIZE_OP,0))<<POS_OP)))
+/*
+** BASE MACROS (operating on raw/decrypted instructions)
+*/
+#define getarg_raw(i,pos,size)	(cast(int, ((i)>>pos) & MASK1(size,0)))
+#define setarg_raw(i,v,pos,size) ((i) = (((i)&MASK0(size,pos)) | \
+                ((cast(Instruction, v)<<pos)&MASK1(size,pos))))
 
-#define GET_OPCODE_I(i) (cast(OpCode, (((i)>>POS_OP) & MASK1(SIZE_OP,0)) ^ LUA_OP_XOR))
+#define GET_OPCODE_I(i) (cast(OpCode, luaP_op_decode[cast(lu_byte, (((i)>>POS_OP) & MASK1(SIZE_OP,0)) ^ LUA_OP_XOR)]))
+#define SET_OPCODE_I(i,o) ((i) = (((i)&MASK0(SIZE_OP,POS_OP)) | \
+                ((cast(Instruction, luaP_op_encode[o] ^ LUA_OP_XOR)<<POS_OP)&MASK1(SIZE_OP,POS_OP))))
 
-#define getarg(i,pos,size)	(cast(int, ((i)>>pos) & MASK1(size,0)))
-#define setarg(i,v,pos,size)	((i) = ENCRYPT_INST((((DECRYPT_INST(i))&MASK0(size,pos)) | \
-                ((cast(Instruction, v)<<pos)&MASK1(size,pos)))))
+#define GETARG_A_I(i)	getarg_raw(i, POS_A, SIZE_A)
+#define SETARG_A_I(i,v)	setarg_raw(i, v, POS_A, SIZE_A)
 
-#define GETARG_A(i)	getarg(DECRYPT_INST(i), POS_A, SIZE_A)
-#define SETARG_A(i,v)	setarg(i, v, POS_A, SIZE_A)
+#define GETARG_B_I(i)	getarg_raw(i, POS_B, SIZE_B)
+#define SETARG_B_I(i,v)	setarg_raw(i, v, POS_B, SIZE_B)
 
-#define GETARG_B(i)	getarg(DECRYPT_INST(i), POS_B, SIZE_B)
-#define SETARG_B(i,v)	setarg(i, v, POS_B, SIZE_B)
+#define GETARG_C_I(i)	getarg_raw(i, POS_C, SIZE_C)
+#define SETARG_C_I(i,v)	setarg_raw(i, v, POS_C, SIZE_C)
 
-#define GETARG_C(i)	getarg(DECRYPT_INST(i), POS_C, SIZE_C)
-#define SETARG_C(i,v)	setarg(i, v, POS_C, SIZE_C)
+#define GETARG_Bx_I(i)	getarg_raw(i, POS_Bx, SIZE_Bx)
+#define SETARG_Bx_I(i,v) setarg_raw(i, v, POS_Bx, SIZE_Bx)
 
-#define GETARG_Bx(i)	getarg(DECRYPT_INST(i), POS_Bx, SIZE_Bx)
-#define SETARG_Bx(i,v)	setarg(i, v, POS_Bx, SIZE_Bx)
+#define GETARG_Ax_I(i)	getarg_raw(i, POS_Ax, SIZE_Ax)
+#define SETARG_Ax_I(i,v) setarg_raw(i, v, POS_Ax, SIZE_Ax)
 
-#define GETARG_Ax(i)	getarg(DECRYPT_INST(i), POS_Ax, SIZE_Ax)
-#define SETARG_Ax(i,v)	setarg(i, v, POS_Ax, SIZE_Ax)
+#define GETARG_sBx_I(i)	(GETARG_Bx_I(i)-MAXARG_sBx)
+#define SETARG_sBx_I(i,b) SETARG_Bx_I((i),cast(unsigned int, (b)+MAXARG_sBx))
+
+#define CREATE_ABC_I(o,a,b,c)	((cast(Instruction, luaP_op_encode[o] ^ LUA_OP_XOR)<<POS_OP) \
+			| (cast(Instruction, a)<<POS_A) \
+			| (cast(Instruction, b)<<POS_B) \
+			| (cast(Instruction, c)<<POS_C))
+
+#define CREATE_ABx_I(o,a,bc)	((cast(Instruction, luaP_op_encode[o] ^ LUA_OP_XOR)<<POS_OP) \
+			| (cast(Instruction, a)<<POS_A) \
+			| (cast(Instruction, bc)<<POS_Bx))
+
+
+/*
+** OBFUSCATED MACROS (using encryption layer, used in VM and Dumper)
+*/
+#define GET_OPCODE(i)	GET_OPCODE_I(DECRYPT_INST(i))
+#define SET_OPCODE(i,o)	((i) = ENCRYPT_INST((((DECRYPT_INST(i))&MASK0(SIZE_OP,POS_OP)) | \
+		((cast(Instruction, luaP_op_encode[o] ^ LUA_OP_XOR)<<POS_OP)&MASK1(SIZE_OP,POS_OP)))))
+
+#define GETARG_A(i)	GETARG_A_I(DECRYPT_INST(i))
+#define SETARG_A(i,v)	((i) = ENCRYPT_INST((((DECRYPT_INST(i))&MASK0(SIZE_A,POS_A)) | \
+                ((cast(Instruction, v)<<POS_A)&MASK1(SIZE_A,POS_A)))))
+
+#define GETARG_B(i)	GETARG_B_I(DECRYPT_INST(i))
+#define SETARG_B(i,v)	((i) = ENCRYPT_INST((((DECRYPT_INST(i))&MASK0(SIZE_B,POS_B)) | \
+                ((cast(Instruction, v)<<POS_B)&MASK1(SIZE_B,POS_B)))))
+
+#define GETARG_C(i)	GETARG_C_I(DECRYPT_INST(i))
+#define SETARG_C(i,v)	((i) = ENCRYPT_INST((((DECRYPT_INST(i))&MASK0(SIZE_C,POS_C)) | \
+                ((cast(Instruction, v)<<POS_C)&MASK1(SIZE_C,POS_C)))))
+
+#define GETARG_Bx(i)	GETARG_Bx_I(DECRYPT_INST(i))
+#define SETARG_Bx(i,v)	((i) = ENCRYPT_INST((((DECRYPT_INST(i))&MASK0(SIZE_Bx,POS_Bx)) | \
+                ((cast(Instruction, v)<<POS_Bx)&MASK1(SIZE_Bx,POS_Bx)))))
+
+#define GETARG_Ax(i)	GETARG_Ax_I(DECRYPT_INST(i))
+#define SETARG_Ax(i,v)	((i) = ENCRYPT_INST((((DECRYPT_INST(i))&MASK0(SIZE_Ax,POS_Ax)) | \
+                ((cast(Instruction, v)<<POS_Ax)&MASK1(SIZE_Ax,POS_Ax)))))
 
 #define GETARG_sBx(i)	(GETARG_Bx(i)-MAXARG_sBx)
 #define SETARG_sBx(i,b)	SETARG_Bx((i),cast(unsigned int, (b)+MAXARG_sBx))
 
 
-#define CREATE_ABC(o,a,b,c)	ENCRYPT_INST(((cast(Instruction, (o) ^ LUA_OP_XOR) & MASK1(SIZE_OP,0))<<POS_OP) \
-			| (cast(Instruction, a)<<POS_A) \
-			| (cast(Instruction, b)<<POS_B) \
-			| (cast(Instruction, c)<<POS_C))
-
-#define CREATE_ABx(o,a,bc)	ENCRYPT_INST(((cast(Instruction, (o) ^ LUA_OP_XOR) & MASK1(SIZE_OP,0))<<POS_OP) \
-			| (cast(Instruction, a)<<POS_A) \
-			| (cast(Instruction, bc)<<POS_Bx))
-
-#define CREATE_Ax(o,a)		ENCRYPT_INST(((cast(Instruction, (o) ^ LUA_OP_XOR) & MASK1(SIZE_OP,0))<<POS_OP) \
-			| (cast(Instruction, a)<<POS_Ax))
+#define CREATE_ABC(o,a,b,c)	ENCRYPT_INST(CREATE_ABC_I(o,a,b,c))
+#define CREATE_ABx(o,a,bc)	ENCRYPT_INST(CREATE_ABx_I(o,a,bc))
+#define CREATE_Ax(o,a)		ENCRYPT_INST(((cast(Instruction, luaP_op_encode[o] ^ LUA_OP_XOR)<<POS_OP) \
+			| (cast(Instruction, a)<<POS_Ax)))
 
 
 
@@ -288,6 +323,8 @@ enum OpArgMask {
 };
 
 LUAI_DDEC const lu_byte luaP_opmodes[NUM_OPCODES];
+LUAI_DDEC const lu_byte luaP_op_encode[64];
+LUAI_DDEC const lu_byte luaP_op_decode[64];
 
 #define getOpMode(m)	(cast(enum OpMode, luaP_opmodes[m] & 3))
 #define getBMode(m)	(cast(enum OpArgMask, (luaP_opmodes[m] >> 4) & 3))

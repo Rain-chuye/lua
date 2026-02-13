@@ -225,7 +225,9 @@ static unsigned int computesizes (unsigned int nums[], unsigned int *pna) {
   unsigned int na = 0;  /* number of elements to go to array part */
   unsigned int optimal = 0;  /* optimal size for array part */
   /* loop while keys can fill more than half of total size */
-  for (i = 0, twotoi = 1; *pna > twotoi / 2; i++, twotoi *= 2) {
+  for (i = 0, twotoi = 1;
+       twotoi > 0 && *pna > twotoi / 2;
+       i++, twotoi *= 2) {
     if (nums[i] > 0) {
       a += nums[i];
       if (a > twotoi/2) {  /* more than half elements present? */
@@ -332,17 +334,33 @@ static void setnodevector (lua_State *L, Table *t, unsigned int size) {
 }
 
 
+typedef struct {
+  Table *t;
+  unsigned int nhsize;
+} AuxsetnodeT;
+
+static void auxsetnode (lua_State *L, void *ud) {
+  AuxsetnodeT *asn = cast(AuxsetnodeT *, ud);
+  setnodevector(L, asn->t, asn->nhsize);
+}
+
 void luaH_resize (lua_State *L, Table *t, unsigned int nasize,
                                           unsigned int nhsize) {
   unsigned int i;
   int j;
+  AuxsetnodeT asn;
   unsigned int oldasize = t->sizearray;
   int oldhsize = t->lsizenode;
   Node *nold = t->node;  /* save old hash ... */
   if (nasize > oldasize)  /* array part must grow? */
     setarrayvector(L, t, nasize);
   /* create new hash part with appropriate size */
-  setnodevector(L, t, nhsize);
+  //setnodevector(L, t, nhsize);
+  asn.t = t; asn.nhsize = nhsize;
+  if (luaD_rawrunprotected(L, auxsetnode, &asn) != LUA_OK) {  /* mem. error? */
+    setarrayvector(L, t, oldasize);  /* array back to its original size */
+    luaD_throw(L, LUA_ERRMEM);  /* rethrow memory error */
+  }
   if (nasize < oldasize) {  /* array part must shrink? */
     t->sizearray = nasize;
     /* re-insert elements from vanishing slice */
@@ -408,6 +426,7 @@ Table *luaH_new (lua_State *L) {
   t->flags = cast_byte(~0);
   t->array = NULL;
   t->sizearray = 0;
+  t->type=0;
   setnodevector(L, t, 0);
   return t;
 }
@@ -442,7 +461,7 @@ static Node *getfreepos (Table *t) {
 TValue *luaH_newkey (lua_State *L, Table *t, const TValue *key) {
   Node *mp;
   TValue aux;
-  if (ttisnil(key)) luaG_runerror(L, "table index is nil");
+  if (ttisnil(key)) luaG_runerror(L, "表索引为空");
   else if (ttisfloat(key)) {
     lua_Integer k;
     if (luaV_tointeger(key, &k, 0)) {  /* index is int? */
@@ -450,7 +469,7 @@ TValue *luaH_newkey (lua_State *L, Table *t, const TValue *key) {
       key = &aux;  /* insert it as an integer */
     }
     else if (luai_numisnan(fltvalue(key)))
-      luaG_runerror(L, "table index is NaN");
+      luaG_runerror(L, "表索引为 NaN");
   }
   mp = mainposition(t, key);
   if (!ttisnil(gval(mp)) || isdummy(mp)) {  /* main position is taken? */
@@ -610,7 +629,7 @@ void luaH_setint (lua_State *L, Table *t, lua_Integer key, TValue *value) {
 }
 
 
-static int unbound_search (Table *t, unsigned int j) {
+static unsigned int unbound_search (Table *t, unsigned int j) {
   unsigned int i = j;  /* i is zero or a present index */
   j++;
   /* find 'i' and 'j' such that i is present and j is not */
@@ -638,10 +657,13 @@ static int unbound_search (Table *t, unsigned int j) {
 ** Try to find a boundary in table 't'. A 'boundary' is an integer index
 ** such that t[i] is non-nil and t[i+1] is nil (and 0 if t[1] is nil).
 */
-int luaH_getn (Table *t) {
+unsigned int luaH_getn (Table *t) {
   unsigned int j = t->sizearray;
   if (j > 0 && ttisnil(&t->array[j - 1])) {
     /* there is a boundary in the array part: (binary) search for it */
+    /*for (j; j > 0; j--) {
+      if (!ttisnil(&t->array[j - 1])) return j;
+    }*/
     unsigned int i = 0;
     while (j - i > 1) {
       unsigned int m = (i+j)/2;
