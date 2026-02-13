@@ -82,69 +82,6 @@ enum OpMode {iABC, iABx, iAsBx, iAx};  /* basic instruction format */
 /* creates a mask with 'n' 0 bits at position 'p' */
 #define MASK0(n,p)	(~MASK1(n,p))
 
-/*
-** the following macros help to manipulate instructions
-*/
-
-#include "lobfuscator.h"
-#define GET_OPCODE(i)	(cast(OpCode, (luaP_op_decode[cast(lu_byte, (DECRYPT_INST(i)>>POS_OP) & MASK1(SIZE_OP,0))]) ^ LUA_OP_XOR))
-#define SET_OPCODE(i,o)	((i) = ENCRYPT_INST((((DECRYPT_INST(i))&MASK0(SIZE_OP,POS_OP)) | \
-		((cast(Instruction, luaP_op_encode[(o) ^ LUA_OP_XOR])<<POS_OP)&MASK1(SIZE_OP,POS_OP)))))
-
-#define getarg(i,pos,size)	(cast(int, ((i)>>pos) & MASK1(size,0)))
-#define setarg(i,v,pos,size)	((i) = ENCRYPT_INST((((DECRYPT_INST(i))&MASK0(size,pos)) | \
-                ((cast(Instruction, v)<<pos)&MASK1(size,pos)))))
-
-#define GETARG_A(i)	getarg(DECRYPT_INST(i), POS_A, SIZE_A)
-#define SETARG_A(i,v)	setarg(i, v, POS_A, SIZE_A)
-
-#define GETARG_B(i)	getarg(DECRYPT_INST(i), POS_B, SIZE_B)
-#define SETARG_B(i,v)	setarg(i, v, POS_B, SIZE_B)
-
-#define GETARG_C(i)	getarg(DECRYPT_INST(i), POS_C, SIZE_C)
-#define SETARG_C(i,v)	setarg(i, v, POS_C, SIZE_C)
-
-#define GETARG_Bx(i)	getarg(DECRYPT_INST(i), POS_Bx, SIZE_Bx)
-#define SETARG_Bx(i,v)	setarg(i, v, POS_Bx, SIZE_Bx)
-
-#define GETARG_Ax(i)	getarg(DECRYPT_INST(i), POS_Ax, SIZE_Ax)
-#define SETARG_Ax(i,v)	setarg(i, v, POS_Ax, SIZE_Ax)
-
-#define GETARG_sBx(i)	(GETARG_Bx(i)-MAXARG_sBx)
-#define SETARG_sBx(i,b)	SETARG_Bx((i),cast(unsigned int, (b)+MAXARG_sBx))
-
-
-#define CREATE_ABC(o,a,b,c)	ENCRYPT_INST(((cast(Instruction, luaP_op_encode[(o) ^ LUA_OP_XOR])<<POS_OP) \
-			| (cast(Instruction, a)<<POS_A) \
-			| (cast(Instruction, b)<<POS_B) \
-			| (cast(Instruction, c)<<POS_C)))
-
-#define CREATE_ABx(o,a,bc)	ENCRYPT_INST(((cast(Instruction, luaP_op_encode[(o) ^ LUA_OP_XOR])<<POS_OP) \
-			| (cast(Instruction, a)<<POS_A) \
-			| (cast(Instruction, bc)<<POS_Bx)))
-
-#define CREATE_Ax(o,a)		ENCRYPT_INST(((cast(Instruction, luaP_op_encode[(o) ^ LUA_OP_XOR])<<POS_OP) \
-			| (cast(Instruction, a)<<POS_Ax)))
-
-
-/*
-** Macros to operate RK indices
-*/
-
-/* this bit 1 means constant (0 means register) */
-#define BITRK		(1 << (SIZE_B - 1))
-
-/* test whether value is a constant */
-#define ISK(x)		((x) & BITRK)
-
-/* gets the index of the constant */
-#define INDEXK(r)	((int)(r) & ~BITRK)
-
-#define MAXINDEXRK	(BITRK - 1)
-
-/* code a constant index as a RK value */
-#define RKASK(x)	((x) | BITRK)
-
 
 /*
 ** invalid register that fits in 8 bits
@@ -230,15 +167,84 @@ OP_CLOSURE,/*	A Bx	R(A) := closure(KPROTO[Bx])			*/
 OP_VARARG,/*	A B	R(A), R(A+1), ..., R(A+B-2) = vararg		*/
 
 OP_EXTRAARG,/*	Ax	extra (larger) argument for previous opcode	*/
-OP_TBC,
-OP_NEWARRAY,/*	A B C	R(A) := {} (size = B,C)				*/
-    OP_TFOREACH,/*	A C	R(A+3), ... ,R(A+2+C) := R(A)(R(A+1), R(A+2));	*/
-    OP_VIRTUAL
+/* Virtualized Opcodes */
+OP_VADD,
+OP_VSUB,
+OP_VMUL,
+OP_VAND,
+OP_VOR,
+OP_VXOR
 } OpCode;
 
 
-#define NUM_OPCODES	(cast(int, OP_VIRTUAL) + 1)
+#define NUM_OPCODES	(cast(int, OP_VXOR) + 1)
 
+/*
+** the following macros help to manipulate instructions
+*/
+
+#include "lobfuscator.h"
+
+#define GET_OPCODE(i)	(cast(OpCode, (((DECRYPT_INST(i))>>POS_OP) & MASK1(SIZE_OP,0)) ^ LUA_OP_XOR))
+#define SET_OPCODE(i,o)	((i) = ENCRYPT_INST(((DECRYPT_INST(i))&MASK0(SIZE_OP,POS_OP)) | \
+		((cast(Instruction, (o) ^ LUA_OP_XOR) & MASK1(SIZE_OP,0))<<POS_OP)))
+
+#define GET_OPCODE_I(i) (cast(OpCode, (((i)>>POS_OP) & MASK1(SIZE_OP,0)) ^ LUA_OP_XOR))
+
+#define getarg(i,pos,size)	(cast(int, ((i)>>pos) & MASK1(size,0)))
+#define setarg(i,v,pos,size)	((i) = ENCRYPT_INST((((DECRYPT_INST(i))&MASK0(size,pos)) | \
+                ((cast(Instruction, v)<<pos)&MASK1(size,pos)))))
+
+#define GETARG_A(i)	getarg(DECRYPT_INST(i), POS_A, SIZE_A)
+#define SETARG_A(i,v)	setarg(i, v, POS_A, SIZE_A)
+
+#define GETARG_B(i)	getarg(DECRYPT_INST(i), POS_B, SIZE_B)
+#define SETARG_B(i,v)	setarg(i, v, POS_B, SIZE_B)
+
+#define GETARG_C(i)	getarg(DECRYPT_INST(i), POS_C, SIZE_C)
+#define SETARG_C(i,v)	setarg(i, v, POS_C, SIZE_C)
+
+#define GETARG_Bx(i)	getarg(DECRYPT_INST(i), POS_Bx, SIZE_Bx)
+#define SETARG_Bx(i,v)	setarg(i, v, POS_Bx, SIZE_Bx)
+
+#define GETARG_Ax(i)	getarg(DECRYPT_INST(i), POS_Ax, SIZE_Ax)
+#define SETARG_Ax(i,v)	setarg(i, v, POS_Ax, SIZE_Ax)
+
+#define GETARG_sBx(i)	(GETARG_Bx(i)-MAXARG_sBx)
+#define SETARG_sBx(i,b)	SETARG_Bx((i),cast(unsigned int, (b)+MAXARG_sBx))
+
+
+#define CREATE_ABC(o,a,b,c)	ENCRYPT_INST(((cast(Instruction, (o) ^ LUA_OP_XOR) & MASK1(SIZE_OP,0))<<POS_OP) \
+			| (cast(Instruction, a)<<POS_A) \
+			| (cast(Instruction, b)<<POS_B) \
+			| (cast(Instruction, c)<<POS_C))
+
+#define CREATE_ABx(o,a,bc)	ENCRYPT_INST(((cast(Instruction, (o) ^ LUA_OP_XOR) & MASK1(SIZE_OP,0))<<POS_OP) \
+			| (cast(Instruction, a)<<POS_A) \
+			| (cast(Instruction, bc)<<POS_Bx))
+
+#define CREATE_Ax(o,a)		ENCRYPT_INST(((cast(Instruction, (o) ^ LUA_OP_XOR) & MASK1(SIZE_OP,0))<<POS_OP) \
+			| (cast(Instruction, a)<<POS_Ax))
+
+
+
+/*
+** Macros to operate RK indices
+*/
+
+/* this bit 1 means constant (0 means register) */
+#define BITRK		(1 << (SIZE_B - 1))
+
+/* test whether value is a constant */
+#define ISK(x)		((x) & BITRK)
+
+/* gets the index of the constant */
+#define INDEXK(r)	((int)(r) & ~BITRK)
+
+#define MAXINDEXRK	(BITRK - 1)
+
+/* code a constant index as a RK value */
+#define RKASK(x)	((x) | BITRK)
 
 
 /*===========================================================================
@@ -282,8 +288,6 @@ enum OpArgMask {
 };
 
 LUAI_DDEC const lu_byte luaP_opmodes[NUM_OPCODES];
-LUAI_DDEC const lu_byte luaP_op_encode[64];
-LUAI_DDEC const lu_byte luaP_op_decode[64];
 
 #define getOpMode(m)	(cast(enum OpMode, luaP_opmodes[m] & 3))
 #define getBMode(m)	(cast(enum OpArgMask, (luaP_opmodes[m] >> 4) & 3))

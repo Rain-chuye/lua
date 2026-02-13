@@ -65,10 +65,12 @@ LUAI_DDEF const char *const luaP_opnames[NUM_OPCODES+1] = {
   "CLOSURE",
   "VARARG",
   "EXTRAARG",
-  "TBC",
-  "NEWARRAY",
-  "FOREACH",
-  "VIRTUAL",
+  "VADD",
+  "VSUB",
+  "VMUL",
+  "VAND",
+  "VOR",
+  "VXOR",
   NULL
 };
 
@@ -123,21 +125,11 @@ LUAI_DDEF const lu_byte luaP_opmodes[NUM_OPCODES] = {
  ,opmode(0, 0, OpArgU, OpArgU, iABC)		/* OP_SETLIST */
  ,opmode(0, 1, OpArgU, OpArgN, iABx)		/* OP_CLOSURE */
  ,opmode(0, 1, OpArgU, OpArgN, iABC)		/* OP_VARARG */
- ,opmode(0, 0, OpArgU, OpArgU, iAx)		    /* OP_EXTRAARG */
- ,opmode(0, 0, OpArgN, OpArgN, iABC)		/* OP_TBC */
- ,opmode(0, 1, OpArgU, OpArgN, iABC)		/* OP_NEWARRAY */
- ,opmode(0, 0, OpArgN, OpArgU, iABC)		/* OP_TFOREACH */
- ,opmode(0, 0, OpArgN, OpArgN, iAx)		/* OP_VIRTUAL */
-};
-LUAI_DDEF const lu_byte luaP_op_encode[64] = {
-  13, 2, 45, 8, 21, 34, 1, 50, 9, 27, 44, 12, 5, 33, 48, 20,
-  39, 11, 29, 6, 18, 42, 31, 15, 56, 23, 37, 10, 25, 41, 30, 14,
-  55, 26, 38, 7, 22, 47, 19, 4, 32, 54, 36, 62, 24, 3, 46, 61,
-  28, 17, 53, 60, 40, 35, 43, 0, 59, 52, 58, 57, 16, 49, 63, 32
-};
-LUAI_DDEF const lu_byte luaP_op_decode[64] = {
-  55, 6, 1, 45, 39, 12, 19, 35, 3, 8, 27, 17, 11, 0, 31, 23,
-  60, 49, 20, 38, 15, 4, 36, 25, 44, 28, 33, 9, 48, 18, 30, 22,
-  63, 13, 5, 53, 42, 26, 34, 16, 52, 29, 21, 54, 10, 2, 46, 37,
-  14, 61, 7, 22, 57, 50, 41, 32, 24, 59, 58, 56, 51, 47, 43, 62
+ ,opmode(0, 0, OpArgU, OpArgU, iAx)		/* OP_EXTRAARG */
+ ,opmode(0, 1, OpArgK, OpArgK, iABC)		/* OP_VADD */
+ ,opmode(0, 1, OpArgK, OpArgK, iABC)		/* OP_VSUB */
+ ,opmode(0, 1, OpArgK, OpArgK, iABC)		/* OP_VMUL */
+ ,opmode(0, 1, OpArgK, OpArgK, iABC)		/* OP_VAND */
+ ,opmode(0, 1, OpArgK, OpArgK, iABC)		/* OP_VOR */
+ ,opmode(0, 1, OpArgK, OpArgK, iABC)		/* OP_VXOR */
 };

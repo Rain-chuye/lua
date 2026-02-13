@@ -1,50 +1,59 @@
 #include "lobfuscator.h"
 #include "lopcodes.h"
-#include "lfunc.h"
-#include "ldebug.h"
-#include "lmem.h"
-#include "lstate.h"
 #include "lstring.h"
+#include "lmem.h"
+#include <stdlib.h>
+#include <string.h>
 
-#define PACK_VIRT(op,a,b,c) (((unsigned int)(op) << 24) | ((unsigned int)(a) << 16) | ((unsigned int)(b) << 8) | (unsigned int)(c))
-
-/*
-** Commercial-grade Data Flow Obfuscation:
-** MBA (Mixed Boolean-Arithmetic) Virtualization
-*/
-
-static void virtualize_proto_internal(lua_State *L, Proto *f) {
+static void virtualize_proto_internal(Proto *f) {
     int i;
     for (i = 0; i < f->sizecode; i++) {
-        Instruction inst = DECRYPT_INST(f->code[i]);
-        lu_byte op_val = cast(lu_byte, (inst >> POS_OP) & 0x3F);
-        OpCode op = cast(OpCode, (luaP_op_decode[op_val]) ^ LUA_OP_XOR);
+        Instruction *pi = &f->code[i];
+        OpCode op = GET_OPCODE(*pi);
 
-        if (op == OP_ADD || op == OP_SUB || op == OP_MUL || op == OP_BAND || op == OP_BOR || op == OP_BXOR) {
-            int a = getarg(inst, POS_A, SIZE_A);
-            int b = getarg(inst, POS_B, SIZE_B);
-            int c = getarg(inst, POS_C, SIZE_C);
-            /* Only virtualize if B and C are registers */
-            if (b < 256 && c < 256) {
-                int vop;
-                switch(op) {
-                    case OP_ADD: vop = 0; break;
-                    case OP_SUB: vop = 1; break;
-                    case OP_MUL: vop = 2; break;
-                    case OP_BAND: vop = 3; break;
-                    case OP_BOR: vop = 4; break;
-                    case OP_BXOR: vop = 5; break;
-                    default: vop = 0;
-                }
-                f->code[i] = CREATE_Ax(OP_VIRTUAL, PACK_VIRT(vop, a, b, c));
-            }
+        switch (op) {
+            case OP_ADD: SET_OPCODE(*pi, OP_VADD); break;
+            case OP_SUB: SET_OPCODE(*pi, OP_VSUB); break;
+            case OP_MUL: SET_OPCODE(*pi, OP_VMUL); break;
+            case OP_BAND: SET_OPCODE(*pi, OP_VAND); break;
+            case OP_BOR: SET_OPCODE(*pi, OP_VOR); break;
+            case OP_BXOR: SET_OPCODE(*pi, OP_VXOR); break;
+            default: break;
         }
-    }
-    for (i = 0; i < f->sizep; i++) {
-        virtualize_proto_internal(L, f->p[i]);
     }
 }
 
-void obfuscate_proto(lua_State *L, Proto *f, int encrypt_k) {
-    virtualize_proto_internal(L, f);
+void obfuscate_proto(lua_State *L, Proto *f, int is_dumping) {
+    int i;
+    if (f->is_obfuscated) return;
+
+    /* Instruction Virtualization */
+    virtualize_proto_internal(f);
+
+    /* Metadata Stripping */
+    f->source = luaS_new(L, "=[obfuscated]");
+    if (f->locvars) {
+        for (i = 0; i < f->sizelocvars; i++) {
+            f->locvars[i].varname = luaS_new(L, "");
+        }
+    }
+    if (f->upvalues) {
+        for (i = 0; i < f->sizeupvalues; i++) {
+            f->upvalues[i].name = luaS_new(L, "");
+        }
+    }
+    if (f->lineinfo) {
+        for (i = 0; i < f->sizelineinfo; i++) f->lineinfo[i] = 0;
+    }
+
+    /* Control Flow Obfuscation (Light)
+       OpCode Randomization and Instruction Encryption already provide
+       significant control flow obfuscation by hiding the instruction types.
+    */
+
+    for (i = 0; i < f->sizep; i++) {
+        obfuscate_proto(L, f->p[i], is_dumping);
+    }
+
+    f->is_obfuscated = 1;
 }

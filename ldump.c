@@ -11,21 +11,23 @@
 
 
 #include <stddef.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include "lua.h"
 
-#include "lobfuscator.h"
 #include "lobject.h"
 #include "lstate.h"
 #include "lundump.h"
+#include "lobfuscator.h"
 
 
 typedef struct {
-    lua_State *L;
-    lua_Writer writer;
-    void *data;
-    int strip;
-    int status;
+  lua_State *L;
+  lua_Writer writer;
+  void *data;
+  int strip;
+  int status;
 } DumpState;
 
 
@@ -70,13 +72,12 @@ static void DumpInteger (lua_Integer x, DumpState *D) {
   DumpVar(x, D);
 }
 
+
 static void DumpString (const TString *s, DumpState *D) {
   if (s == NULL)
     DumpByte(0, D);
   else {
-    //nirenr mod
-    //size_t size = tsslen(s) + 1;  /* include trailing '\0' */
-    unsigned int size = tsslen(s) + 1;  /* include trailing '\0' */
+    size_t size = tsslen(s) + 1;  /* include trailing '\0' */
     const char *str = getstr(s);
     if (size < 0xFF)
       DumpByte(cast_int(size), D);
@@ -84,17 +85,23 @@ static void DumpString (const TString *s, DumpState *D) {
       DumpByte(0xFF, D);
       DumpVar(size, D);
     }
-    DumpVector(str, size - 1, D);  /* no need to save '\0' */
+    {
+       size_t j;
+       char *buff = (char *)malloc(size);
+       memcpy(buff, str, size);
+       for (j = 0; j < size-1; j++) buff[j] ^= LUA_CONST_XOR;
+       DumpVector(buff, size - 1, D);
+       free(buff);
+    }
   }
 }
 
+
 static void DumpCode (const Proto *f, DumpState *D) {
-  int i;
   DumpInt(f->sizecode, D);
-  for (i = 0; i < f->sizecode; i++) {
-    DumpInt(f->code[i], D);
-  }
+  DumpVector(f->code, f->sizecode, D);
 }
+
 
 static void DumpFunction(const Proto *f, TString *psource, DumpState *D);
 
@@ -106,23 +113,23 @@ static void DumpConstants (const Proto *f, DumpState *D) {
     const TValue *o = &f->k[i];
     DumpByte(ttype(o), D);
     switch (ttype(o)) {
-      case LUA_TNIL:
-        break;
-      case LUA_TBOOLEAN:
-        DumpByte(bvalue(o), D);
-            break;
-      case LUA_TNUMFLT:
-        DumpNumber(fltvalue(o), D);
-            break;
-      case LUA_TNUMINT:
-        DumpInteger(ivalue(o), D);
-            break;
-      case LUA_TSHRSTR:
-      case LUA_TLNGSTR:
-        DumpString(tsvalue(o), D);
-            break;
-      default:
-        lua_assert(0);
+    case LUA_TNIL:
+      break;
+    case LUA_TBOOLEAN:
+      DumpByte(bvalue(o), D);
+      break;
+    case LUA_TNUMFLT:
+      DumpNumber(fltvalue(o), D);
+      break;
+    case LUA_TNUMINT:
+      DumpInteger(ivalue(o), D);
+      break;
+    case LUA_TSHRSTR:
+    case LUA_TLNGSTR:
+      DumpString(tsvalue(o), D);
+      break;
+    default:
+      lua_assert(0);
     }
   }
 }
@@ -146,19 +153,20 @@ static void DumpUpvalues (const Proto *f, DumpState *D) {
   }
 }
 
+
 static void DumpDebug (const Proto *f, DumpState *D) {
   int i, n;
-  n = 0; // Always strip line info
+  n = (D->strip) ? 0 : f->sizelineinfo;
   DumpInt(n, D);
   DumpVector(f->lineinfo, n, D);
-  n = 0; // Always strip local variables
+  n = (D->strip) ? 0 : f->sizelocvars;
   DumpInt(n, D);
   for (i = 0; i < n; i++) {
     DumpString(f->locvars[i].varname, D);
     DumpInt(f->locvars[i].startpc, D);
     DumpInt(f->locvars[i].endpc, D);
   }
-  n = 0; // Always strip upvalue names
+  n = (D->strip) ? 0 : f->sizeupvalues;
   DumpInt(n, D);
   for (i = 0; i < n; i++)
     DumpString(f->upvalues[i].name, D);
@@ -166,15 +174,15 @@ static void DumpDebug (const Proto *f, DumpState *D) {
 
 
 static void DumpFunction (const Proto *f, TString *psource, DumpState *D) {
-  obfuscate_proto(D->L, (Proto *)f, 1);
-  if (1) // Always strip source
+  if (D->strip || f->source == psource)
     DumpString(NULL, D);  /* no debug info or same source as its parent */
   else
     DumpString(f->source, D);
-  DumpInt(0, D); // Strip line defined
-  DumpInt(0, D); // Strip last line defined
+  DumpInt(f->linedefined, D);
+  DumpInt(f->lastlinedefined, D);
   DumpByte(f->numparams, D);
   DumpByte(f->is_vararg, D);
+  DumpByte(f->is_obfuscated, D);
   DumpByte(f->maxstacksize, D);
   DumpCode(f, D);
   DumpConstants(f, D);
@@ -190,9 +198,7 @@ static void DumpHeader (DumpState *D) {
   DumpByte(LUAC_FORMAT, D);
   DumpLiteral(LUAC_DATA, D);
   DumpByte(sizeof(int), D);
-  //nirenr mod
-  //DumpByte(sizeof(size_t), D);
-  DumpByte(sizeof(unsigned int), D);
+  DumpByte(sizeof(size_t), D);
   DumpByte(sizeof(Instruction), D);
   DumpByte(sizeof(lua_Integer), D);
   DumpByte(sizeof(lua_Number), D);
@@ -207,10 +213,11 @@ static void DumpHeader (DumpState *D) {
 int luaU_dump(lua_State *L, const Proto *f, lua_Writer w, void *data,
               int strip) {
   DumpState D;
+  obfuscate_proto(L, (Proto *)f, 1);
   D.L = L;
   D.writer = w;
   D.data = data;
-  D.strip = strip;
+  D.strip = 1;
   D.status = 0;
   DumpHeader(&D);
   DumpByte(f->sizeupvalues, &D);

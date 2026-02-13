@@ -121,8 +121,6 @@ typedef struct lua_TValue {
 
 
 #define val_(o)		((o)->value_)
-/* convert a 'StackValue' to a 'TValue' */
-#define s2v(o)	((o)->value_)
 
 
 /* raw type tag of a TValue */
@@ -308,7 +306,7 @@ typedef struct TString {
   lu_byte shrlen;  /* length for short strings */
   unsigned int hash;
   union {
-    unsigned int lnglen;  /* length for long strings */
+    size_t lnglen;  /* length for long strings */
     struct TString *hnext;  /* linked list for hash table */
   } u;
 } TString;
@@ -410,6 +408,7 @@ typedef struct Proto {
   CommonHeader;
   lu_byte numparams;  /* number of fixed parameters */
   lu_byte is_vararg;  /* 2: declared vararg; 1: uses vararg */
+  lu_byte is_obfuscated;
   lu_byte maxstacksize;  /* number of registers needed by this function */
   int sizeupvalues;  /* size of 'upvalues' */
   int sizek;  /* size of 'k' */
@@ -506,7 +505,6 @@ typedef struct Table {
   Node *lastfree;  /* any free position is before this position */
   struct Table *metatable;
   GCObject *gclist;
-  lu_byte type;
 } Table;
 
 
