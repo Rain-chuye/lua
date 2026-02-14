@@ -410,7 +410,6 @@ typedef struct Proto {
   CommonHeader;
   lu_byte numparams;  /* number of fixed parameters */
   lu_byte is_vararg;  /* 2: declared vararg; 1: uses vararg */
-  lu_byte is_obfuscated;
   lu_byte maxstacksize;  /* number of registers needed by this function */
   int sizeupvalues;  /* size of 'upvalues' */
   int sizek;  /* size of 'k' */

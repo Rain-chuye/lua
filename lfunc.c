@@ -153,7 +153,6 @@ Proto *luaF_newproto (lua_State *L) {
   f->sizeupvalues = 0;
   f->numparams = 0;
   f->is_vararg = 0;
-  f->is_obfuscated = 0;
   f->maxstacksize = 0;
   f->locvars = NULL;
   f->sizelocvars = 0;

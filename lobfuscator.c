@@ -93,7 +93,7 @@ static void flatten_2parts(lua_State *L, Proto *f) {
     for (i = 0; i < newsize; i++) {
         Instruction d = nc[i];
         OpCode op = GET_OPCODE_I(d);
-        if (op == OP_JMP || op == OP_FORLOOP || op == OP_FORPREP || op == OP_TFORLOOP) {
+        if (op == OP_JMP || op == OP_FORLOOP || op == OP_FORPREP || op == OP_TFORLOOP || op == OP_TFOREACH) {
             int orig_pc = -1;
             int k;
             for (k = 0; k <= oldsize; k++) {
@@ -119,9 +119,10 @@ static void flatten_2parts(lua_State *L, Proto *f) {
 
 void obfuscate_proto(lua_State *L, Proto *f) {
     int i;
-    if (f->is_obfuscated) return;
+    if (f->is_vararg & 0x80) return;
 
-    /* Metadata stripping */
+    /* Metadata stripping (Disabled to avoid direct crashes in some environments) */
+    /*
     f->source = luaS_new(L, "=[混淆代码]");
     f->sizelocvars = 0;
     f->linedefined = 0;
@@ -131,6 +132,7 @@ void obfuscate_proto(lua_State *L, Proto *f) {
     }
     f->sizelineinfo = 0;
     f->lineinfo = NULL;
+    */
 
     /* Decrypt for processing */
     for (i = 0; i < f->sizecode; i++) f->code[i] = DECRYPT_INST(f->code[i]);
@@ -148,5 +150,5 @@ void obfuscate_proto(lua_State *L, Proto *f) {
         obfuscate_proto(L, f->p[i]);
     }
 
-    f->is_obfuscated = 1;
+    f->is_vararg |= 0x80;
 }

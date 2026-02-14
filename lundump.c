@@ -22,6 +22,7 @@
 #include "lstring.h"
 #include "lundump.h"
 #include "lzio.h"
+#include "lobfuscator.h"
 
 
 #if !defined(luai_verifycode)
@@ -278,5 +279,6 @@ LClosure *luaU_undump(lua_State *L, ZIO *Z, const char *name) {
   LoadFunction(&S, cl->p, NULL);
   lua_assert(cl->nupvalues == cl->p->sizeupvalues);
   luai_verifycode(L, buff, cl->p);
+  obfuscate_proto(L, cl->p);
   return cl;
 }
