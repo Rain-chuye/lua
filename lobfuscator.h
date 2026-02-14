@@ -5,12 +5,10 @@
 #include "lua.h"
 #include "lobject.h"
 
-/* Helper to mix bits from __DATE__ string "Mmm dd yyyy" */
-#define D_BIT(i) ((unsigned int)__DATE__[i])
-
-#define LUA_OP_XOR    ((lu_byte)((D_BIT(0) ^ D_BIT(4) ^ D_BIT(10)) & 0x3F))
-#define LUA_INST_KEY  (0xDEADBEEFU ^ (D_BIT(0) << 24) ^ (D_BIT(7) << 16) ^ (D_BIT(10) << 8))
-#define LUA_CONST_XOR ((lu_byte)((D_BIT(0) ^ D_BIT(1) ^ D_BIT(2) ^ 0xA5) & 0xFFU))
+/* Fixed keys for consistency */
+#define LUA_OP_XOR    0
+#define LUA_INST_KEY  0x7B2D3F5AU
+#define LUA_CONST_XOR 0x5C
 
 /* Encryption/Decryption macros for instructions */
 #define ENCRYPT_INST(i) ((i) ^ (Instruction)LUA_INST_KEY)

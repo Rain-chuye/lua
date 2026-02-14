@@ -40,6 +40,7 @@ static void flatten_2parts(lua_State *L, Proto *f) {
         else if (op == OP_LOADKX) forbidden = 1;
         else if (op == OP_SETLIST && GETARG_C_I(inst) == 0) forbidden = 1;
         else if (op == OP_TFOREACH) forbidden = 1; /* Custom foreach prep */
+        else if (op == OP_LOADBOOL && GETARG_C_I(inst) != 0) forbidden = 1;
 
         if (forbidden) mid++;
         else break;
@@ -92,7 +93,7 @@ static void flatten_2parts(lua_State *L, Proto *f) {
     for (i = 0; i < newsize; i++) {
         Instruction d = nc[i];
         OpCode op = GET_OPCODE_I(d);
-        if (op == OP_JMP || op == OP_FORLOOP || op == OP_FORPREP || op == OP_TFORLOOP || op == OP_TFOREACH) {
+        if (op == OP_JMP || op == OP_FORLOOP || op == OP_FORPREP || op == OP_TFORLOOP) {
             int orig_pc = -1;
             int k;
             for (k = 0; k <= oldsize; k++) {

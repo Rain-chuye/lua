@@ -209,7 +209,6 @@ static void LoadFunction (LoadState *S, Proto *f, TString *psource) {
   f->lastlinedefined = LoadInt(S);
   f->numparams = LoadByte(S);
   f->is_vararg = LoadByte(S);
-  f->is_obfuscated = LoadByte(S);
   f->maxstacksize = LoadByte(S);
   LoadCode(S, f);
   LoadConstants(S, f);

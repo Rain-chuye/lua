@@ -170,7 +170,6 @@ static void DumpFunction (const Proto *f, TString *psource, DumpState *D) {
   DumpInt(f->lastlinedefined, D);
   DumpByte(f->numparams, D);
   DumpByte(f->is_vararg, D);
-  DumpByte(f->is_obfuscated, D);
   DumpByte(f->maxstacksize, D);
   DumpCode(f, D);
   DumpConstants(f, D);

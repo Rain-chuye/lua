@@ -502,6 +502,12 @@ static const char *getfuncname (lua_State *L, CallInfo *ci, const char **name) {
       tm = cast(TMS, offset + cast_int(TM_ADD));  /* ORDER TM */
       break;
     }
+    case OP_VADD: tm = TM_ADD; break;
+    case OP_VSUB: tm = TM_SUB; break;
+    case OP_VMUL: tm = TM_MUL; break;
+    case OP_VAND: tm = TM_BAND; break;
+    case OP_VOR: tm = TM_BOR; break;
+    case OP_VXOR: tm = TM_BXOR; break;
     case OP_UNM: tm = TM_UNM; break;
     case OP_BNOT: tm = TM_BNOT; break;
     case OP_LEN: tm = TM_LEN; break;
