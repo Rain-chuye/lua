@@ -86,17 +86,14 @@ enum OpMode {iABC, iABx, iAsBx, iAx};  /* basic instruction format */
 ** the following macros help to manipulate instructions
 */
 
-#define LUA_OP_XOR cast(lu_byte, (__DATE__[2] ^ __DATE__[9]) & 0x3F)
-#define GET_OPCODE_I(i) (cast(OpCode, luaP_op_decode[cast(lu_byte, (((i)>>POS_OP) & MASK1(SIZE_OP,0)) ^ LUA_OP_XOR) & 0x3F]))
+#define LUA_OP_XOR 0
+#define GET_OPCODE_I(i) (cast(OpCode, (((i)>>POS_OP) & MASK1(SIZE_OP,0))))
 #define SET_OPCODE_I(i,o) ((i) = (((i)&MASK0(SIZE_OP,POS_OP)) | \
-                ((cast(Instruction, luaP_op_encode[o] ^ LUA_OP_XOR)<<POS_OP)&MASK1(SIZE_OP,POS_OP))))
+                ((cast(Instruction, o)<<POS_OP)&MASK1(SIZE_OP,POS_OP))))
 
-#define GET_OPCODE(i) GET_OPCODE_I(i)
-#define SET_OPCODE(i,o) SET_OPCODE_I(i,o)
-#define GET_OPCODE_I(i) (cast(OpCode, luaP_op_decode[cast(lu_byte, (((i)>>POS_OP) & MASK1(SIZE_OP,0)) ^ LUA_OP_XOR) & 0x3F]))
-#define SET_OPCODE_I(i,o) ((i) = (((i)&MASK0(SIZE_OP,POS_OP)) | \
-                ((cast(Instruction, luaP_op_encode[o] ^ LUA_OP_XOR)<<POS_OP)&MASK1(SIZE_OP,POS_OP))))
-
+#define GET_OPCODE(i)	(cast(OpCode, ((i)>>POS_OP) & MASK1(SIZE_OP,0)))
+#define SET_OPCODE(i,o)	((i) = (((i)&MASK0(SIZE_OP,POS_OP)) | \
+		((cast(Instruction, o)<<POS_OP)&MASK1(SIZE_OP,POS_OP))))
 #define GETARG_A_I(i)	getarg(i, POS_A, SIZE_A)
 #define SETARG_A_I(i,v)	setarg(i, v, POS_A, SIZE_A)
 
@@ -138,27 +135,21 @@ enum OpMode {iABC, iABx, iAsBx, iAx};  /* basic instruction format */
 #define SETARG_sBx(i,b)	SETARG_Bx((i),cast(unsigned int, (b)+MAXARG_sBx))
 
 
-#define LUA_INST_KEY 0x56781234
-#define ENCRYPT_INST(i) ((i) ^ LUA_INST_KEY)
-#define DECRYPT_INST(i) ((i) ^ LUA_INST_KEY)
+#define LUA_INST_KEY 0
+#define ENCRYPT_INST(i) (i)
+#define DECRYPT_INST(i) (i)
 
-#define CREATE_ABC_I(o,a,b,c)	((cast(Instruction, luaP_op_encode[o] ^ LUA_OP_XOR)<<POS_OP) \
+#define CREATE_ABC(o,a,b,c)	((cast(Instruction, o)<<POS_OP) \
 			| (cast(Instruction, a)<<POS_A) \
 			| (cast(Instruction, b)<<POS_B) \
 			| (cast(Instruction, c)<<POS_C))
 
-#define CREATE_ABC(o,a,b,c)	CREATE_ABC_I(o,a,b,c)
-
-#define CREATE_ABx_I(o,a,bc)	((cast(Instruction, luaP_op_encode[o] ^ LUA_OP_XOR)<<POS_OP) \
+#define CREATE_ABx(o,a,bc)	((cast(Instruction, o)<<POS_OP) \
 			| (cast(Instruction, a)<<POS_A) \
 			| (cast(Instruction, bc)<<POS_Bx))
 
-#define CREATE_ABx(o,a,bc)	CREATE_ABx_I(o,a,bc)
-
-#define CREATE_Ax_I(o,a)		((cast(Instruction, luaP_op_encode[o] ^ LUA_OP_XOR)<<POS_OP) \
+#define CREATE_Ax(o,a)		((cast(Instruction, o)<<POS_OP) \
 			| (cast(Instruction, a)<<POS_Ax))
-
-#define CREATE_Ax(o,a)		CREATE_Ax_I(o,a)
 
 /* this bit 1 means constant (0 means register) */
 #define BITRK		(1 << (SIZE_B - 1))
@@ -313,8 +304,8 @@ enum OpArgMask {
   OpArgK   /* argument is a constant or register/constant */
 };
 
-LUAI_DDEC const lu_byte luaP_opmodes[NUM_OPCODES];
-LUAI_DDEC const lu_byte luaP_op_encode[64];
+LUAI_DDEC const lu_byte luaP_opmodes[64];
+LUAI_DDEC const char *const luaP_opnames[64+1];  /* opcode names */
 LUAI_DDEC const lu_byte luaP_op_decode[64];
 
 #define getOpMode(m)	(cast(enum OpMode, luaP_opmodes[m] & 3))
@@ -324,7 +315,6 @@ LUAI_DDEC const lu_byte luaP_op_decode[64];
 #define testTMode(m)	(luaP_opmodes[m] & (1 << 7))
 
 
-LUAI_DDEC const char *const luaP_opnames[NUM_OPCODES+1];  /* opcode names */
 
 
 /* number of list items to accumulate before a SETLIST instruction */

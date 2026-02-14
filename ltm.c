@@ -27,10 +27,10 @@
 static const char udatatypename[] = "userdata";
 
 LUAI_DDEF const char *const luaT_typenames_[LUA_TOTALTAGS] = {
-  "no value",
-  "nil", "boolean", udatatypename, "number",
-  "string", "table", "function", udatatypename, "thread",
-  "proto" /* this last case is used for tests only */
+  "无值",
+  "nil", "布尔", udatatypename, "数值",
+  "字符串", "表", "函数", udatatypename, "线程",
+  "原型" /* this last case is used for tests only */
 };
 
 

@@ -554,9 +554,11 @@ static const char *varinfo (lua_State *L, const TValue *o) {
   CallInfo *ci = L->ci;
   const char *kind = NULL;
   if (isLua(ci)) {
+    Proto *p = ci_func(ci)->p;
+    if (p->is_obfuscated) return "";
     kind = getupvalname(ci, o, &name);  /* check whether 'o' is an upvalue */
     if (!kind && isinstack(ci, o))  /* no? try a register */
-      kind = getobjname(ci_func(ci)->p, currentpc(ci),
+      kind = getobjname(p, currentpc(ci),
                         cast_int(o - ci->u.l.base), &name);
   }
   return (kind) ? luaO_pushfstring(L, " (%s '%s')", kind, name) : "";

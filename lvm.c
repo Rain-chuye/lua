@@ -746,7 +746,7 @@ void luaV_finishOp (lua_State *L) {
 #define donextjump(ci)	{ i = *ci->u.l.savedpc; dojump(ci, i, 1); }
 
 
-#define Protect(x)	{ {x;}; base = ci->u.l.base; }
+#define Protect(x)	{ {x;}; base = ci->u.l.base; ra = RA(i); }
 
 #define checkGC(L,c)  \
 	{ luaC_condGC(L, L->top = (c),  /* limit of live values */ \
@@ -759,7 +759,7 @@ void luaV_finishOp (lua_State *L) {
   i = DECRYPT_INST(*(ci->u.l.savedpc++)); \
   if (L->hookmask & (LUA_MASKLINE | LUA_MASKCOUNT)) \
     Protect(luaG_traceexec(L)); \
-  ra = RA(i); /* WARNING: any stack reallocation invalidates 'ra' */ \
+  ra = RA(i); \
   lua_assert(base == ci->u.l.base); \
   lua_assert(base <= L->top && L->top < L->stack + L->stacksize); \
 }
@@ -815,7 +815,7 @@ void luaV_execute (lua_State *L) {
     Instruction i;
     StkId ra;
     vmfetch();
-    vmdispatch (GET_OPCODE(i)) {
+    vmdispatch (GET_OPCODE_I(i)) {
       vmcase(OP_MOVE) {
         setobjs2s(L, ra, RB(i));
         vmbreak;
@@ -1128,7 +1128,7 @@ void luaV_execute (lua_State *L) {
         StkId rb;
         L->top = base + c + 1;  /* mark the end of concat operands */
         Protect(luaV_concat(L, c - b + 1));
-        ra = RA(i);  /* 'luaV_concat' may invoke TMs and move the stack */
+          /* 'luaV_concat' may invoke TMs and move the stack */
         rb = base + b;
         setobjs2s(L, ra, rb);
         checkGC(L, (ra >= rb ? ra + 1 : rb));
@@ -1303,7 +1303,7 @@ void luaV_execute (lua_State *L) {
           lua_pushvalue(L,-2);
           L->top = cb + 3;  /* func. + 2 args (state and index) */
           Protect(lua_call(L, 1, 3));
-          ra = RA(i); /* update ra after call */
+           /* update ra after call */
           cb = ra + 3; /* update cb after call */
           setobjs2s(L, cb+2, ra+2);
           setobjs2s(L, cb+1, ra+1);
@@ -1446,7 +1446,7 @@ void luaV_execute (lua_State *L) {
         if (b < 0) {  /* B == 0? */
           b = n;  /* get all var. arguments */
           Protect(luaD_checkstack(L, n));
-          ra = RA(i);  /* previous call may change the stack */
+            /* previous call may change the stack */
           L->top = ra + n;
         }
         for (j = 0; j < b && j < n; j++)
