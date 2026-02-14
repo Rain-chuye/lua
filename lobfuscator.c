@@ -119,31 +119,37 @@ void obfuscate_proto(lua_State *L, Proto *f) {
     int i;
     if (f->is_obfuscated) return;
 
-    /* Metadata stripping */
+    /* Metadata stripping (Safer version) */
     f->source = luaS_new(L, "=[混淆代码]");
     f->sizelocvars = 0;
-    f->linedefined = 0;
-    f->lastlinedefined = 0;
     if (f->upvalues) {
         for (i = 0; i < f->sizeupvalues; i++) f->upvalues[i].name = NULL;
     }
+    /* Clear line information */
+    if (f->lineinfo) {
+        luaM_freearray(L, f->lineinfo, f->sizelineinfo);
+        f->lineinfo = NULL;
+    }
     f->sizelineinfo = 0;
-    f->lineinfo = NULL;
+    f->linedefined = 0;
+    f->lastlinedefined = 0;
 
-    /* Decrypt for processing */
-    for (i = 0; i < f->sizecode; i++) f->code[i] = DECRYPT_INST(f->code[i]);
+    /* Instructions are currently plain (randomized but not encrypted) */
 
     /* Instruction Virtualization */
     virtualize_proto_internal(f);
 
     /* Flattening */
-    flatten_2parts(L, f);
+    if (f->sizecode >= 6 && f->sizecode <= 1000) {
+        flatten_2parts(L, f);
+    }
 
-    /* Re-encrypt */
+    /* Final Encryption (MANDATORY for all functions) */
     for (i = 0; i < f->sizecode; i++) f->code[i] = ENCRYPT_INST(f->code[i]);
 
     f->is_obfuscated = 1;
 
+    /* Recursively obfuscate nested prototypes */
     for (i = 0; i < f->sizep; i++) {
         obfuscate_proto(L, f->p[i]);
     }

@@ -565,7 +565,13 @@ static const char *varinfo (lua_State *L, const TValue *o) {
 
 l_noret luaG_typeerror (lua_State *L, const TValue *o, const char *op) {
   const char *t = luaT_objtypename(L, o);
-  luaG_runerror(L, "尝试%s一个%s值%s", op, t, varinfo(L, o));
+  const char *zh_op = op;
+  if (strcmp(op, "perform arithmetic on") == 0) zh_op = "进行算术运算";
+  else if (strcmp(op, "perform bitwise operation on") == 0) zh_op = "进行位运算";
+  else if (strcmp(op, "get length of") == 0) zh_op = "获取长度";
+  else if (strcmp(op, "index") == 0) zh_op = "索引";
+  else if (strcmp(op, "call") == 0) zh_op = "调用";
+  luaG_runerror(L, "尝试%s一个%s值%s", zh_op, t, varinfo(L, o));
 }
 
 

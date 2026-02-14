@@ -149,7 +149,7 @@ void luaT_trybinTM (lua_State *L, const TValue *p1, const TValue *p2,
       }
       /* calls never return, but to avoid warnings: *//* FALLTHROUGH */
       default:
-        luaG_opinterror(L, p1, p2, "进行算术运算");
+        luaG_opinterror(L, p1, p2, "perform arithmetic on");
     }
   }
 }

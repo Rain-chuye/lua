@@ -67,7 +67,7 @@ LUAI_DDEF const char *const luaP_opnames[NUM_OPCODES+1] = {
   "EXTRAARG",
   "TBC",
   "NEWARRAY",
-  "TFOREACH",
+  "FOREACH",
   "VADD",
   "VSUB",
   "VMUL",
@@ -128,10 +128,10 @@ LUAI_DDEF const lu_byte luaP_opmodes[NUM_OPCODES] = {
  ,opmode(0, 0, OpArgU, OpArgU, iABC)		/* OP_SETLIST */
  ,opmode(0, 1, OpArgU, OpArgN, iABx)		/* OP_CLOSURE */
  ,opmode(0, 1, OpArgU, OpArgN, iABC)		/* OP_VARARG */
- ,opmode(0, 0, OpArgU, OpArgU, iAx)		/* OP_EXTRAARG */
+ ,opmode(0, 0, OpArgU, OpArgU, iAx)		    /* OP_EXTRAARG */
  ,opmode(0, 0, OpArgN, OpArgN, iABC)		/* OP_TBC */
  ,opmode(0, 1, OpArgU, OpArgN, iABC)		/* OP_NEWARRAY */
- ,opmode(0, 0, OpArgN, OpArgU, iABC)		/* OP_TFOREACH */
+        ,opmode(0, 0, OpArgN, OpArgU, iABC)		/* OP_TFOREACH */
  ,opmode(0, 1, OpArgK, OpArgK, iABC)		/* OP_VADD */
  ,opmode(0, 1, OpArgK, OpArgK, iABC)		/* OP_VSUB */
  ,opmode(0, 1, OpArgK, OpArgK, iABC)		/* OP_VMUL */
@@ -139,16 +139,15 @@ LUAI_DDEF const lu_byte luaP_opmodes[NUM_OPCODES] = {
  ,opmode(0, 1, OpArgK, OpArgK, iABC)		/* OP_VOR */
  ,opmode(0, 1, OpArgK, OpArgK, iABC)		/* OP_VXOR */
 };
-
 LUAI_DDEF const lu_byte luaP_op_encode[64] = {
-  24, 37, 61, 47, 52, 53, 55, 21, 43, 10, 34, 58, 42, 7, 18, 63,
-  44, 54, 25, 16, 60, 49, 14, 0, 48, 40, 9, 26, 23, 33, 5, 4,
-  12, 15, 3, 56, 13, 31, 1, 22, 38, 41, 32, 45, 19, 2, 11, 51,
-  27, 36, 6, 28, 39, 50, 46, 62, 8, 57, 17, 29, 30, 20, 35, 59
+  23, 25, 7, 22, 45, 33, 19, 59, 46, 9, 40, 18, 42, 31, 16, 21,
+  36, 41, 29, 20, 11, 50, 39, 48, 3, 30, 24, 55, 4, 57, 54, 49,
+  10, 0, 60, 28, 44, 26, 52, 12, 35, 53, 38, 32, 58, 13, 51, 62,
+  2, 27, 37, 5, 34, 56, 43, 6, 61, 8, 63, 15, 17, 47, 1, 14
 };
 LUAI_DDEF const lu_byte luaP_op_decode[64] = {
-  23, 38, 45, 34, 31, 30, 50, 13, 56, 26, 9, 46, 32, 36, 22, 33,
-  19, 58, 14, 44, 61, 7, 39, 28, 0, 18, 27, 48, 51, 59, 60, 37,
-  42, 29, 10, 62, 49, 1, 40, 52, 25, 41, 12, 8, 16, 43, 54, 3,
-  24, 21, 53, 47, 4, 5, 17, 6, 35, 57, 11, 63, 20, 2, 55, 15
+  33, 62, 48, 24, 28, 51, 55, 2, 57, 9, 32, 20, 39, 45, 63, 59,
+  14, 60, 11, 6, 19, 15, 3, 0, 26, 1, 37, 49, 35, 18, 25, 13,
+  43, 5, 52, 40, 16, 50, 42, 22, 10, 17, 12, 54, 36, 4, 8, 61,
+  23, 31, 21, 46, 38, 41, 30, 27, 53, 29, 44, 7, 34, 56, 47, 58
 };
