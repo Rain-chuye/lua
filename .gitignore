@@ -1,0 +1,7 @@
+*.o
+lua
+luac
+liblua.a
+custom_lua.zip
+custom_lua/
+out.txt
