@@ -921,7 +921,7 @@ static int dir_iter_factory (lua_State *L) {
 #else
   d->dir = opendir (path);
   if (d->dir == NULL)
-    luaL_error (L, "cannot open %s: %s", path, strerror (errno));
+    luaL_error (L, "无法 open %s: %s", path, strerror (errno));
 #endif
   return 1;
 }
@@ -1029,7 +1029,7 @@ static int io_noclose (lua_State *L) {
   LStream *p = tolstream(L);
   p->closef = &io_noclose;  /* keep file opened */
   lua_pushnil(L);
-  lua_pushliteral(L, "cannot close standard file");
+  lua_pushliteral(L, "无法 close standard file");
   return 2;
 }
 

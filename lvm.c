@@ -216,7 +216,7 @@ void luaV_finishset (lua_State *L, const TValue *t, TValue *key,
           slot = luaH_newkey(L, h, key);  /* create one */
         /* no metamethod and (now) there is an entry with given key */
         setobj2t(L, cast(TValue *, slot), val);  /* set its new value */
-        invalidateTMcache(h);
+        无效ateTMcache(h);
         luaC_barrierback(L, h, val);
         return;
       }
@@ -778,7 +778,7 @@ static const TValue *get_rk_ptr(TValue *k, int arg, TValue *tmp) {
   i = *(ci->u.l.savedpc++); \
   if (L->hookmask & (LUA_MASKLINE | LUA_MASKCOUNT)) \
     Protect(luaG_traceexec(L)); \
-  ra = RA(i); /* WARNING: any stack reallocation invalidates 'ra' */ \
+  ra = RA(i); /* WARNING: any stack reallocation 无效ates 'ra' */ \
   lua_assert(base == ci->u.l.base); \
   lua_assert(base <= L->top && L->top < L->stack + L->stacksize); \
 }

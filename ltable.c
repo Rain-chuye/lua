@@ -375,7 +375,7 @@ void luaH_resize (lua_State *L, Table *t, unsigned int nasize,
   for (j = twoto(oldhsize) - 1; j >= 0; j--) {
     Node *old = nold + j;
     if (!ttisnil(gval(old))) {
-      /* doesn't need barrier/invalidate cache, as entry was
+      /* doesn't need barrier/无效ate cache, as entry was
          already present in the table */
       setobjt2t(L, luaH_set(L, t, gkey(old)), gval(old));
     }
@@ -605,7 +605,7 @@ const TValue *luaH_get (Table *t, const TValue *key) {
 
 /*
 ** beware: when using this function you probably need to check a GC
-** barrier and invalidate the TM cache.
+** barrier and 无效ate the TM cache.
 */
 TValue *luaH_set (lua_State *L, Table *t, const TValue *key) {
   const TValue *p = luaH_get(t, key);

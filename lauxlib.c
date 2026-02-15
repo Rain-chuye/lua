@@ -190,7 +190,7 @@ static int typeerror (lua_State *L, int arg, const char *tname) {
     typearg = "light userdata";  /* special name for messages */
   else
     typearg = luaL_typename(L, arg);  /* standard name */
-  msg = lua_pushfstring(L, "%s expected, got %s", tname, typearg);
+  msg = lua_pushfstring(L, "%s expected, 得到 %s", tname, typearg);
   return luaL_argerror(L, arg, msg);
 }
 
@@ -220,7 +220,7 @@ LUALIB_API void luaL_where (lua_State *L, int level) {
 /*
 ** Again, the use of 'lua_pushvfstring' ensures this function does
 ** not need reserved stack space when called. (At worst, it generates
-** an error with "stack overflow" instead of the given message.)
+** an error with "栈溢出" instead of the given message.)
 */
 LUALIB_API int luaL_error (lua_State *L, const char *fmt, ...) {
   va_list argp;
@@ -364,7 +364,7 @@ LUALIB_API int luaL_checkoption (lua_State *L, int arg, const char *def,
 ** Ensures the stack has at least 'space' extra slots, raising an error
 ** if it cannot fulfill the request. (The error handling needs a few
 ** extra slots to format the error message. In case of an error without
-** this extra space, Lua will generate the same 'stack overflow' error,
+** this extra space, Lua will generate the same '栈溢出' error,
 ** but without 'msg'.)
 */
 LUALIB_API void luaL_checkstack (lua_State *L, int space, const char *msg) {
@@ -423,7 +423,7 @@ LUALIB_API lua_Number luaL_optnumber (lua_State *L, int arg, lua_Number def) {
 
 static void interror (lua_State *L, int arg) {
   if (lua_isnumber(L, arg))
-    luaL_argerror(L, arg, "number has no integer representation");
+    luaL_argerror(L, arg, "number has 没有整数表示");
   else
     tag_error(L, arg, LUA_TNUMBER);
 }
@@ -1062,8 +1062,8 @@ LUALIB_API void luaL_checkversion_ (lua_State *L, lua_Number ver, size_t sz) {
   if (sz != LUAL_NUMSIZES)  /* check numeric types */
     luaL_error(L, "core and library have incompatible numeric types");
   if (v != lua_version(NULL))
-    luaL_error(L, "multiple Lua VMs detected");
+    luaL_error(L, "检测到多个 Lua 虚拟机");
   else if (*v != ver)
-    luaL_error(L, "version mismatch: app. needs %f, Lua core provides %f",
+    luaL_error(L, "version 不匹配: 应用程序需要 %f, Lua 核心提供 %f",
                   ver, *v);
 }

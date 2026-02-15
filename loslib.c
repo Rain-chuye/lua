@@ -175,7 +175,7 @@ static int os_tmpname (lua_State *L) {
   int err;
   lua_tmpnam(buff, err);
   if (err)
-    return luaL_error(L, "unable to generate a unique filename");
+    return luaL_error(L, "无法 generate a unique filename");
   lua_pushstring(L, buff);
   return 1;
 }
@@ -277,7 +277,7 @@ static const char *checkoption (lua_State *L, const char *conv, char *buff) {
     }
   }
   luaL_argerror(L, 1,
-    lua_pushfstring(L, "invalid conversion specifier '%%%s'", conv));
+    lua_pushfstring(L, "无效 conversion specifier '%%%s'", conv));
   return conv;  /* to avoid warnings */
 }
 
@@ -296,7 +296,7 @@ static int os_date (lua_State *L) {
   }
   else
     stm = l_localtime(&t, &tmr);
-  if (stm == NULL)  /* invalid date? */
+  if (stm == NULL)  /* 无效 date? */
     luaL_error(L, "time result cannot be represented in this installation");
   if (strcmp(s, "*t") == 0) {
     lua_createtable(L, 0, 9);  /* 9 = number of fields */

@@ -244,7 +244,7 @@ static void checkliteral (LoadState *S, const char *s, const char *msg) {
 
 static void fchecksize (LoadState *S, size_t size, const char *tname) {
   if (LoadByte(S) != size)
-    error(S, luaO_pushfstring(S->L, "%s size mismatch in", tname));
+    error(S, luaO_pushfstring(S->L, "%s size 不匹配 in", tname));
 }
 
 

@@ -73,12 +73,12 @@ static void expr (LexState *ls, expdesc *v);
 
 /* semantic error */
 static l_noret semerror (LexState *ls, const char *msg) {
-  ls->t.token = 0;  /* remove "near <token>" from final message */
+  ls->t.token = 0;  /* remove "附近 <token>" from final message */
   luaX_syntaxerror(ls, msg);
 }
 
 
-static l_noret error_expected (LexState *ls, int token) {
+static l_noret error_期望 (LexState *ls, int token) {
   luaX_syntaxerror(ls,
       luaO_pushfstring(ls->L, "期望 %s", luaX_token2str(ls, token)));
 }
@@ -90,7 +90,7 @@ static l_noret errorlimit (FuncState *fs, int limit, const char *what) {
   int line = fs->f->linedefined;
   const char *where = (line == 0)
                       ? "主函数"
-                      : luaO_pushfstring(L, "function at line %d", line);
+                      : luaO_pushfstring(L, "function 位于第 %d", line);
   msg = luaO_pushfstring(L, "%s过多 (限制为 %d) 在 %s 中",
                              what, limit, where);
   luaX_syntaxerror(fs->ls, msg);
@@ -119,7 +119,7 @@ static int itestnext (LexState *ls, int c) {
 
 static void check (LexState *ls, int c) {
   if (ls->t.token != c)
-    error_expected(ls, c);
+    error_期望(ls, c);
 }
 
 
@@ -145,10 +145,10 @@ static void ichecknext2 (LexState *ls, int c1, int c2) {
 static void check_match (LexState *ls, int what, int who, int where) {
   if (!testnext(ls, what)) {
     if (where == ls->linenumber)
-      error_expected(ls, what);
+      error_期望(ls, what);
     else {
       luaX_syntaxerror(ls, luaO_pushfstring(ls->L,
-             "期望 %s (to close %s at line %d)",
+             "期望 %s (以闭合 %s 位于第 %d)",
               luaX_token2str(ls, what), luaX_token2str(ls, who), where));
     }
   }
@@ -160,7 +160,7 @@ static TString *str_checkname (LexState *ls) {
   //check(ls, TK_NAME);
   //mod by nirenr
   if (ls->t.token != TK_NAME&&(ls->t.token > TK_WHILE||ls->t.token <FIRST_RESERVED))
-    error_expected(ls, TK_NAME);
+    error_期望(ls, TK_NAME);
   ts = ls->t.seminfo.ts;
   luaX_next(ls);
   return ts;
@@ -374,7 +374,7 @@ static void closegoto (LexState *ls, int g, Labeldesc *label) {
   if (gt->nactvar < label->nactvar) {
     TString *vname = getlocvar(fs, gt->nactvar)->varname;
     const char *msg = luaO_pushfstring(ls->L,
-      "<goto %s> at line %d jumps into the scope of local '%s'",
+      "<goto %s> 位于第 %d jumps into the scope of local '%s'",
       getstr(gt->name), gt->line, getstr(vname));
     semerror(ls, msg);
   }
@@ -387,7 +387,7 @@ static void closegoto (LexState *ls, int g, Labeldesc *label) {
 
 
 /*
-** try to close a goto with existing labels; this solves backward jumps
+** try 以闭合 a goto with existing labels; this solves backward jumps
 */
 static int findlabel (LexState *ls, int g) {
   int i;
@@ -448,7 +448,7 @@ static void findgotos (LexState *ls, Labeldesc *lb) {
 static void movegotosout (FuncState *fs, BlockCnt *bl) {
   int i = bl->firstgoto;
   Labellist *gl = &fs->ls->dyd->gt;
-  /* correct pending gotos to current block and try to close it
+  /* correct pending gotos to current block and try 以闭合 it
      with visible labels */
   while (i < gl->n) {
     Labeldesc *gt = &gl->arr[i];
@@ -496,8 +496,8 @@ static void continuelabel (LexState *ls) {
 */
 static l_noret undefgoto (LexState *ls, Labeldesc *gt) {
   const char *msg = isreserved(gt->name)
-                    ? "<%s> at line %d not inside a loop"
-                    : "no visible label '%s' for <goto> at line %d";
+                    ? "<%s> 位于第 %d not inside a loop"
+                    : "no visible label '%s' for <goto> 位于第 %d";
   msg = luaO_pushfstring(ls->L, msg, getstr(gt->name), gt->line);
   semerror(ls, msg);
 }
@@ -507,7 +507,7 @@ static void leaveblock (FuncState *fs) {
   BlockCnt *bl = fs->bl;
   LexState *ls = fs->ls;
   if (bl->previous && bl->upval) {
-    /* create a 'jump to here' to close upvalues */
+    /* create a 'jump to here' 以闭合 upvalues */
     int j = luaK_jump(fs);
     luaK_patchclose(fs, j, bl->nactvar);
     luaK_patchtohere(fs, j);
@@ -1099,7 +1099,10 @@ static void suffixedexp (LexState *ls, expdesc *v) {
         break;
       }
       case ':': {  /* ':' NAME funcargs */
-        if (luaX_lookahead(ls) != TK_NAME) return;
+        int next_token = luaX_lookahead(ls);
+        if (next_token != TK_NAME && (next_token > TK_WHILE || next_token < FIRST_RESERVED)) return;
+        int next2 = luaX_lookahead2(ls);
+        if (next2 != '(' && next2 != '{' && next2 != TK_STRING) return;
         expdesc key;
         luaX_next(ls);
         checkname(ls, &key);
@@ -1277,7 +1280,7 @@ static BinOpr subexpr (LexState *ls, expdesc *v, int limit) {
 
 static void expr (LexState *ls, expdesc *v) {
   subexpr(ls, v, 0);
-  if (testnext(ls, '?')) {
+  if (ls->linenumber == ls->lastline && testnext(ls, '?')) {
     FuncState *fs = ls->fs;
     int jf;
     expdesc e1, e2;
@@ -1628,7 +1631,7 @@ static void forstat (LexState *ls, int line) {
     case '=': fornum(ls, varname, line); break;
     default: forlist(ls, varname);
     /*case ',': case TK_IN: forlist(ls, varname); break;
-    default: luaX_syntaxerror(ls, "'=' or 'in' expected");*/
+    default: luaX_syntaxerror(ls, "'=' or 'in' 期望");*/
   }
   check_match(ls, TK_END, TK_FOR, line);
   leaveblock(fs);  /* loop scope ('break' jumps to this point) */

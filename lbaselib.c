@@ -374,7 +374,7 @@ static int luaB_loadfile (lua_State *L) {
 
 /*
 ** Reader for generic 'load' function: 'lua_load' uses the
-** stack for internal stuff, so the reader cannot change the
+** stack for internal stuff, so the reader 无法 change the
 ** stack top. Instead, it keeps its resulting string in a
 ** reserved slot inside the stack.
 */

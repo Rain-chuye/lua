@@ -198,7 +198,7 @@ void luaD_growstack (lua_State *L, int n) {
     int newsize = 2 * size;
     if (newsize > LUAI_MAXSTACK) newsize = LUAI_MAXSTACK;
     if (newsize < needed) newsize = needed;
-    if (newsize > LUAI_MAXSTACK) {  /* stack overflow? */
+    if (newsize > LUAI_MAXSTACK) {  /* 栈溢出? */
       luaD_reallocstack(L, ERRORSTACKSIZE);
       luaG_runerror(L, "栈溢出");
     }
@@ -223,11 +223,11 @@ void luaD_shrinkstack (lua_State *L) {
   int inuse = stackinuse(L);
   int goodsize = inuse + (inuse / 8) + 2*EXTRA_STACK;
   if (goodsize > LUAI_MAXSTACK) goodsize = LUAI_MAXSTACK;
-  if (L->stacksize > LUAI_MAXSTACK)  /* was handling stack overflow? */
+  if (L->stacksize > LUAI_MAXSTACK)  /* was handling 栈溢出? */
     luaE_freeCI(L);  /* free all CIs (list grew because of an error) */
   else
     luaE_shrinkCI(L);  /* shrink list */
-  if (inuse <= LUAI_MAXSTACK &&  /* not handling stack overflow? */
+  if (inuse <= LUAI_MAXSTACK &&  /* not handling 栈溢出? */
       goodsize < L->stacksize)  /* trying to shrink? */
     luaD_reallocstack(L, goodsize);  /* shrink it */
   else
@@ -470,8 +470,8 @@ int luaD_poscall (lua_State *L, CallInfo *ci, StkId firstResult, int nres) {
 
 
 /*
-** Check appropriate error for stack overflow ("regular" overflow or
-** overflow while handling stack overflow). If 'nCalls' is larger than
+** Check appropriate error for 栈溢出 ("regular" overflow or
+** overflow while handling 栈溢出). If 'nCalls' is larger than
 ** LUAI_MAXCCALLS (which means it is handling a "regular" overflow) but
 ** smaller than 9/8 of LUAI_MAXCCALLS, does not report an error (to
 ** allow overflow handling to work)
@@ -621,7 +621,7 @@ static void resume (lua_State *L, void *ud) {
   StkId firstArg = L->top - n;  /* first argument */
   CallInfo *ci = L->ci;
   if (nCcalls >= LUAI_MAXCCALLS)
-    resume_error(L, "C stack overflow", firstArg);
+    resume_error(L, "C 栈溢出", firstArg);
   if (L->status == LUA_OK) {  /* may be starting a coroutine */
     if (ci != &L->base_ci)  /* not in base level? */
       resume_error(L, "cannot resume non-suspended coroutine", firstArg);
@@ -756,7 +756,7 @@ struct SParser {  /* data to 'f_parser' */
 static void checkmode (lua_State *L, const char *mode, const char *x) {
   if (mode && strchr(mode, x[0]) == NULL) {
     luaO_pushfstring(L,
-       "attempt to load a %s chunk (mode is '%s')", x, mode);
+       "尝试加载 a %s chunk (mode is '%s')", x, mode);
     luaD_throw(L, LUA_ERRSYNTAX);
   }
 }

@@ -51,7 +51,7 @@ const char lua_ident[] =
 /* test for valid but not pseudo index */
 #define isstackindex(i, o)	(isvalid(o) && !ispseudo(i))
 
-#define api_checkvalidindex(l,o)  api_check(l, isvalid(o), "invalid index")
+#define api_checkvalidindex(l,o)  api_check(l, isvalid(o), "无效 index")
 
 #define api_checkstackindex(l, i, o)  \
 	api_check(l, isstackindex(i, o), "index not in the stack")
@@ -66,7 +66,7 @@ static TValue *index2addr (lua_State *L, int idx) {
     else return o;
   }
   else if (!ispseudo(idx)) {  /* negative index */
-    api_check(L, idx != 0 && -idx <= L->top - (ci->func + 1), "invalid index");
+    api_check(L, idx != 0 && -idx <= L->top - (ci->func + 1), "无效 index");
     return L->top + idx;
   }
   else if (idx == LUA_REGISTRYINDEX)
@@ -179,7 +179,7 @@ LUA_API void lua_settop (lua_State *L, int idx) {
     L->top = (func + 1) + idx;
   }
   else {
-    api_check(L, -(idx+1) <= (L->top - (func + 1)), "invalid new top");
+    api_check(L, -(idx+1) <= (L->top - (func + 1)), "无效 new top");
     L->top += idx+1;  /* 'subtract' index (index is negative) */
   }
   lua_unlock(L);
@@ -210,7 +210,7 @@ LUA_API void lua_rotate (lua_State *L, int idx, int n) {
   t = L->top - 1;  /* end of stack segment being rotated */
   p = index2addr(L, idx);  /* start of segment */
   api_checkstackindex(L, idx, p);
-  api_check(L, (n >= 0 ? n : -n) <= (t - p + 1), "invalid 'n'");
+  api_check(L, (n >= 0 ? n : -n) <= (t - p + 1), "无效 'n'");
   m = (n >= 0 ? t - n : p - n - 1);  /* end of prefix */
   reverse(L, p, m);  /* reverse the prefix with length 'n' */
   reverse(L, m + 1, t);  /* reverse the suffix */
@@ -256,7 +256,7 @@ LUA_API int lua_type (lua_State *L, int idx) {
 
 LUA_API const char *lua_typename (lua_State *L, int t) {
   UNUSED(L);
-  api_check(L, LUA_TNONE <= t && t < LUA_NUMTAGS, "invalid tag");
+  api_check(L, LUA_TNONE <= t && t < LUA_NUMTAGS, "无效 tag");
   return ttypename(t);
 }
 
@@ -326,7 +326,7 @@ LUA_API int lua_compare (lua_State *L, int index1, int index2, int op) {
       case LUA_OPEQ: i = luaV_equalobj(L, o1, o2); break;
       case LUA_OPLT: i = luaV_lessthan(L, o1, o2); break;
       case LUA_OPLE: i = luaV_lessequal(L, o1, o2); break;
-      default: api_check(L, 0, "invalid option");
+      default: api_check(L, 0, "无效 option");
     }
   }
   lua_unlock(L);
@@ -818,7 +818,7 @@ LUA_API void lua_rawset (lua_State *L, int idx) {
     luaG_runerror(L, "常量数组不能被修改");
   slot = luaH_set(L, t, L->top - 2);
   setobj2t(L, slot, L->top - 1);
-  invalidateTMcache(t);
+  无效ateTMcache(t);
   luaC_barrierback(L, t, L->top-1);
   L->top -= 2;
   lua_unlock(L);
@@ -836,7 +836,7 @@ LUA_API void lua_const (lua_State *L, int idx) {
   else
     hvalue(o)->type=2;
   sethvalue(L, L->top, hvalue(o));  /* anchor it */
-  invalidateTMcache(hvalue(o));
+  无效ateTMcache(hvalue(o));
   luaC_barrierback(L, hvalue(o), L->top);
   lua_unlock(L);
 }
@@ -1141,7 +1141,7 @@ LUA_API int lua_gc (lua_State *L, int what, int data) {
       res = g->gcrunning;
       break;
     }
-    default: res = -1;  /* invalid option */
+    default: res = -1;  /* 无效 option */
   }
   lua_unlock(L);
   return res;
@@ -1302,7 +1302,7 @@ static UpVal **getupvalref (lua_State *L, int fidx, int n, LClosure **pf) {
   StkId fi = index2addr(L, fidx);
   api_check(L, ttisLclosure(fi), "Lua 期望函数");
   f = clLvalue(fi);
-  api_check(L, (1 <= n && n <= f->p->sizeupvalues), "invalid upvalue index");
+  api_check(L, (1 <= n && n <= f->p->sizeupvalues), "无效 upvalue index");
   if (pf) *pf = f;
   return &f->upvals[n - 1];  /* get its upvalue pointer */
 }
@@ -1316,7 +1316,7 @@ LUA_API void *lua_upvalueid (lua_State *L, int fidx, int n) {
     }
     case LUA_TCCL: {  /* C closure */
       CClosure *f = clCvalue(fi);
-      api_check(L, 1 <= n && n <= f->nupvalues, "invalid upvalue index");
+      api_check(L, 1 <= n && n <= f->nupvalues, "无效 upvalue index");
       return &f->upvalue[n - 1];
     }
     default: {
