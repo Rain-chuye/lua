@@ -1,0 +1,3 @@
+*.o
+lua533_src/lua/lua
+lua533_src/lua/luac
