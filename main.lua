@@ -81,7 +81,7 @@ function log(msg)
     txt_log.append("\n[" .. os.date("%H:%M:%S") .. "] " .. tostring(msg))
 end
 
--- Obfuscator Core Modules (Internal)
+-- Obfuscator Core Modules
 local package_preload = {}
 
 package_preload["lexer"] = function()
@@ -273,22 +273,50 @@ end
 package_preload["obfuscator"] = function()
     local Obfuscator = {}
     local function gn(c) return string.format("_0x%X", c + 0xABCDEF) end
+    function Obfuscator.desugar(ast)
+        local function walk(n) if not n or type(n) ~= "table" then return n end
+            if n.type == "Block" then for i, v in ipairs(n.body) do n.body[i] = walk(v) end
+            elseif n.type == "ForRange" then
+                local step = n.step or { type = "Number", value = "1" }
+                local start_stmt = { type = "LocalAssign", vars = { n.var }, values = { walk(n.start) } }
+                local cond_expr = { type = "BinaryOp", op = "<=", left = { type = "Var", name = n.var }, right = walk(n.stop) }
+                local update_stmt = { type = "Assign", vars = { { type = "Var", name = n.var } }, values = { { type = "BinaryOp", op = "+", left = { type = "Var", name = n.var }, right = walk(step) } } }
+                return walk({ type = "Block", body = { start_stmt, { type = "While", condition = cond_expr, body = { type = "Block", body = { walk(n.body), update_stmt } } } } })
+            elseif n.type == "ForIn" then
+                local init_stmt = { type = "LocalAssign", vars = { "_f", "_s", "_var" }, values = n.iter }; for i, v in ipairs(init_stmt.values) do init_stmt.values[i] = walk(v) end
+                local loop_vars_stmt = { type = "LocalAssign", vars = n.vars, values = { { type = "Call", func = { type = "Var", name = "_f" }, args = { { type = "Var", name = "_s" }, { type = "Var", name = "_var" } } } } }
+                local break_if = { type = "If", condition = { type = "BinaryOp", op = "==", left = { type = "Var", name = n.vars[1] }, right = { type = "Nil" } }, thenBlock = { type = "Block", body = { { type = "Break" } } }, elseifs = {} }
+                local update_var = { type = "Assign", vars = { { type = "Var", name = "_var" } }, values = { { type = "Var", name = n.vars[1] } } }
+                return walk({ type = "Block", body = { init_stmt, { type = "While", condition = { type = "Boolean", value = true }, body = { type = "Block", body = { loop_vars_stmt, break_if, update_var, walk(n.body) } } } } })
+            elseif n.type == "If" then n.condition = walk(n.condition); n.thenBlock = walk(n.thenBlock); for _, v in ipairs(n.elseifs) do v.cond = walk(v.cond); v.body = walk(v.body) end; if n.elseBlock then n.elseBlock = walk(n.elseBlock) end
+            elseif n.type == "While" or n.type == "Repeat" then n.condition = walk(n.condition); n.body = walk(n.body)
+            elseif n.type == "Do" then n.body = walk(n.body)
+            elseif n.type == "LocalFunction" or n.type == "Function" or n.type == "FunctionDef" then n.body = walk(n.body)
+            elseif n.type == "LocalAssign" or n.type == "Assign" then if n.values then for i, v in ipairs(n.values) do n.values[i] = walk(v) end end
+            elseif n.type == "Call" or n.type == "MemberCall" then if n.func then n.func = walk(n.func) end; if n.table then n.table = walk(n.table) end; for i, v in ipairs(n.args) do n.args[i] = walk(v) end
+            elseif n.type == "BinaryOp" then n.left = walk(n.left); n.right = walk(n.right)
+            elseif n.type == "UnaryOp" then n.operand = walk(n.operand)
+            elseif n.type == "Index" then n.table = walk(n.table); n.key = walk(n.key)
+            elseif n.type == "Table" then for _, f in ipairs(n.fields) do if f.key then f.key = walk(f.key) end; f.value = walk(f.value) end
+            elseif n.type == "Return" then for i, v in ipairs(n.values) do n.values[i] = walk(v) end end
+            return n
+        end
+        return walk(ast)
+    end
     function Obfuscator.obfuscateIdentifiers(ast)
         local c = 0; local gm = {}; local gr = {}; local function gnn() c = c + 1; return gn(c) end
         local function walk(n, s) if not n or type(n) ~= "table" then return end
             if n.type == "Block" then local ns = { parent = s, locals = {} }; for _, v in ipairs(n.body) do walk(v, ns) end
-            elseif n.type == "LocalAssign" then for i, v in ipairs(n.vars) do local nn = gnn(); s.locals[v] = nn; n.vars[i] = nn end; for _, v in ipairs(n.values) do walk(v, s) end
-            elseif n.type == "Assign" then for _, v in ipairs(n.vars) do walk(v, s) end; for _, v in ipairs(n.values) do walk(v, s) end
+            elseif n.type == "LocalAssign" then for i, v in ipairs(n.vars) do local nn = gnn(); s.locals[v] = nn; n.vars[i] = nn end; if n.values then for _, v in ipairs(n.values) do walk(v, s) end end
+            elseif n.type == "Assign" then if n.vars then for _, v in ipairs(n.vars) do walk(v, s) end end; if n.values then for _, v in ipairs(n.values) do walk(v, s) end end
             elseif n.type == "Var" then local cur = s; local f = false; while cur do if cur.locals[n.name] then n.name = cur.locals[n.name]; f = true; break end; cur = cur.parent end; if not f then if not gr[n.name] then gr[n.name] = gnn(); gm[gr[n.name]] = n.name end; n.name = gr[n.name] end
             elseif n.type == "LocalFunction" then local nn = gnn(); s.locals[n.name] = nn; n.name = nn; local fs = { parent = s, locals = {} }; for i, v in ipairs(n.args) do if v ~= "..." then local an = gnn(); fs.locals[v] = an; n.args[i] = an end end; walk(n.body, fs)
             elseif n.type == "Function" then if not n.name:find("[%.:]") then local cur = s; local f = false; while cur do if cur.locals[n.name] then n.name = cur.locals[n.name]; f = true; break end; cur = cur.parent end; if not f then if not gr[n.name] then gr[n.name] = gnn(); gm[gr[n.name]] = n.name end; n.name = gr[n.name] end end; local fs = { parent = s, locals = {} }; for i, v in ipairs(n.args) do if v ~= "..." then local an = gnn(); fs.locals[v] = an; n.args[i] = an end end; walk(n.body, fs)
             elseif n.type == "FunctionDef" then local fs = { parent = s, locals = {} }; for i, v in ipairs(n.args) do if v ~= "..." then local an = gnn(); fs.locals[v] = an; n.args[i] = an end end; walk(n.body, fs)
-            elseif n.type == "ForRange" then walk(n.start, s); walk(n.stop, s); if n.step then walk(n.step, s) end; local fs = { parent = s, locals = {} }; local nv = gnn(); fs.locals[n.var] = nv; n.var = nv; walk(n.body, fs)
-            elseif n.type == "ForIn" then for _, v in ipairs(n.iter) do walk(v, s) end; local fs = { parent = s, locals = {} }; for i, v in ipairs(n.vars) do local nv = gnn(); fs.locals[v] = nv; n.vars[i] = nv end; walk(n.body, fs)
             elseif n.type == "If" then walk(n.condition, s); walk(n.thenBlock, s); for _, v in ipairs(n.elseifs) do walk(v.cond, s); walk(v.body, s) end; if n.elseBlock then walk(n.elseBlock, s) end
             elseif n.type == "While" or n.type == "Repeat" then walk(n.condition, s); walk(n.body, s)
             elseif n.type == "Do" then walk(n.body, s)
-            elseif n.type == "Call" or n.type == "MemberCall" then walk(n.func or n.table, s); for _, v in ipairs(n.args) do walk(v, s) end
+            elseif n.type == "Call" or n.type == "MemberCall" then walk(n.func or n.table, s); if n.args then for _, v in ipairs(n.args) do walk(v, s) end end
             elseif n.type == "BinaryOp" then walk(n.left, s); walk(n.right, s)
             elseif n.type == "UnaryOp" then walk(n.operand, s)
             elseif n.type == "Index" then walk(n.table, s); walk(n.key, s)
@@ -307,14 +335,23 @@ package_preload["obfuscator"] = function()
         local function walk(n) if not n or type(n) ~= "table" then return end
             if n.type == "Block" then local nb = {}; for _, v in ipairs(n.body) do walk(v); if math.random() < 0.1 then table.insert(nb, { type = "If", condition = cp(), thenBlock = { type = "Block", body = { v } }, elseifs = {}, elseBlock = { type = "Block", body = { { type = "Call", func = { type = "Var", name = "print" }, args = { { type = "String", value = "Inaccessible branch" } } } } } }) else table.insert(nb, v) end end; n.body = nb
             elseif n.type == "If" then walk(n.thenBlock); for _, v in ipairs(n.elseifs) do walk(v.body) end; if n.elseBlock then walk(n.elseBlock) end
-            elseif n.type == "While" or n.type == "Repeat" or n.type == "Do" or n.type == "ForRange" or n.type == "ForIn" or n.type == "Function" or n.type == "LocalFunction" or n.type == "FunctionDef" then walk(n.body) end
+            elseif n.type == "While" or n.type == "Repeat" or n.type == "Do" or n.type == "Function" or n.type == "LocalFunction" or n.type == "FunctionDef" then walk(n.body) end
         end
         walk(ast)
     end
     function Obfuscator.flattenControlFlow(ast)
+        local function hasBreakOrReturn(node)
+            local found = false
+            local function check(n)
+                if not n or type(n) ~= "table" or found then return end
+                if n.type == "Break" or n.type == "Return" then found = true return end
+                for _, v in pairs(n) do if type(v) == "table" then check(v) end end
+            end
+            check(node); return found
+        end
         local function walk(n) if not n or type(n) ~= "table" then return end
             if n.type == "Block" then
-                if #n.body > 1 then
+                if #n.body > 1 and not hasBreakOrReturn(n) then
                     local lth = {}; local ns = {}; for _, v in ipairs(n.body) do
                         if v.type == "LocalAssign" then for _, vv in ipairs(v.vars) do table.insert(lth, vv) end; if #v.values > 0 then local vs = {}; for _, vv in ipairs(v.vars) do table.insert(vs, { type = "Var", name = vv }) end; table.insert(ns, { type = "Assign", vars = vs, values = v.values }) end
                         elseif v.type == "LocalFunction" then table.insert(lth, v.name); table.insert(ns, { type = "Assign", vars = { { type = "Var", name = v.name } }, values = { { type = "FunctionDef", args = v.args, body = v.body } } })
@@ -326,9 +363,9 @@ package_preload["obfuscator"] = function()
                     local wb = { { type = "If", condition = { type = "BinaryOp", op = "==", left = { type = "Var", name = "state" }, right = { type = "Number", value = 1 } }, thenBlock = { type = "Block", body = { states[1].stmt, { type = "Assign", vars = { { type = "Var", name = "state" } }, values = { { type = "Number", value = states[1].next } } } } }, elseifs = eifs, elseBlock = nil } }
                     local ob = {}; for _, b in ipairs(fb) do table.insert(ob, b) end; table.insert(ob, { type = "While", condition = { type = "BinaryOp", op = "~=", left = { type = "Var", name = "state" }, right = { type = "Number", value = 0 } }, body = { type = "Block", body = wb } })
                     n.body = { { type = "Do", body = { type = "Block", body = ob } } }
-                elseif #n.body == 1 then walk(n.body[1]) end
+                else for _, v in ipairs(n.body) do walk(v) end end
             elseif n.type == "If" then walk(n.thenBlock); for _, v in ipairs(n.elseifs) do walk(v.body) end; if n.elseBlock then walk(n.elseBlock) end
-            elseif n.type == "While" or n.type == "Repeat" or n.type == "Do" or n.type == "ForRange" or n.type == "ForIn" or n.type == "Function" or n.type == "LocalFunction" or n.type == "FunctionDef" then walk(n.body) end
+            elseif n.type == "While" or n.type == "Repeat" or n.type == "Do" or n.type == "Function" or n.type == "LocalFunction" or n.type == "FunctionDef" then walk(n.body) end
         end
         walk(ast)
     end
@@ -341,6 +378,7 @@ package_preload["virtualizer"] = function()
         local function pp(node, args)
             local constants = {}; local function addK(v) for i, k in ipairs(constants) do if k == v then return i end end; table.insert(constants, v); return #constants end
             local instructions = {}; local function emit(op, arg) table.insert(instructions, { op = op, arg = arg }); return #instructions end
+            local break_stack = {}; local label_map = {}; local goto_stack = {}
             if args then for i, v in ipairs(args) do if v ~= "..." then emit("LOAD_VA", i); emit("SETVAR", addK(v)) end end end
             local function walk(n, multi) if not n then return end
                 if n.type == "Block" then for _, v in ipairs(n.body) do walk(v) end
@@ -366,33 +404,44 @@ package_preload["virtualizer"] = function()
                 elseif n.type == "String" or n.type == "Boolean" or n.type == "Nil" then emit("LOADK", addK(n.value))
                 elseif n.type == "BinaryOp" then walk(n.left); walk(n.right); emit("BINOP", addK(n.op))
                 elseif n.type == "UnaryOp" then walk(n.operand); emit("UNOP", addK(n.op))
-                elseif n.type == "Call" then walk(n.func); for i, v in ipairs(n.args) do if i == #n.args and v.type == "Vararg" then walk(v, true) else walk(v) end end; if multi or (n.args[#n.args] and n.args[#n.args].type == "Vararg") then emit("CALL_M", #n.args) else emit("CALL", #n.args) end
-                elseif n.type == "MemberCall" then walk(n.table); emit("LOADK", addK(n.member)); emit("GETTABLE", 0); walk(n.table); for i, v in ipairs(n.args) do if i == #n.args and v.type == "Vararg" then walk(v, true) else walk(v) end end; if multi or (n.args[#n.args] and n.args[#n.args].type == "Vararg") then emit("CALL_M", #n.args + 1) else emit("CALL", #n.args + 1) end
+                elseif n.type == "Call" then walk(n.func); if n.args then for i, v in ipairs(n.args) do if i == #n.args and v.type == "Vararg" then walk(v, true) else walk(v) end end end; if multi or (n.args and n.args[#n.args] and n.args[#n.args].type == "Vararg") then emit("CALL_M", n.args and #n.args or 0) else emit("CALL", n.args and #n.args or 0) end
+                elseif n.type == "MemberCall" then walk(n.table); emit("LOADK", addK(n.member)); emit("GETTABLE", 0); walk(n.table); if n.args then for i, v in ipairs(n.args) do if i == #n.args and v.type == "Vararg" then walk(v, true) else walk(v) end end end; if multi or (n.args and n.args[#n.args] and n.args[#n.args].type == "Vararg") then emit("CALL_M", (n.args and #n.args or 0) + 1) else emit("CALL", (n.args and #n.args or 0) + 1) end
                 elseif n.type == "If" then
                     local ej = {}; walk(n.condition); local jn = emit("JMP_IF_FALSE", 0); walk(n.thenBlock); table.insert(ej, emit("JMP", 0)); instructions[jn].arg = #instructions + 1
-                    for _, v in ipairs(n.elseifs or {}) do walk(v.cond); jn = emit("JMP_IF_FALSE", 0); walk(v.body); table.insert(ej, emit("JMP", 0)); instructions[jn].arg = #instructions + 1 end
+                    if n.elseifs then for _, v in ipairs(n.elseifs) do walk(v.cond); jn = emit("JMP_IF_FALSE", 0); walk(v.body); table.insert(ej, emit("JMP", 0)); instructions[jn].arg = #instructions + 1 end end
                     if n.elseBlock then walk(n.elseBlock) end; for _, v in ipairs(ej) do instructions[v].arg = #instructions + 1 end
-                elseif n.type == "While" then local si = #instructions + 1; walk(n.condition); local jn = emit("JMP_IF_FALSE", 0); walk(n.body); emit("JMP", si); instructions[jn].arg = #instructions + 1
-                elseif n.type == "Repeat" then local si = #instructions + 1; walk(n.body); walk(n.condition); emit("JMP_IF_FALSE", si)
-                elseif n.type == "ForRange" then local step = n.step or { type = "Number", value = "1" }; walk({ type = "Block", body = { { type = "LocalAssign", vars = { n.var }, values = { n.start } }, { type = "While", condition = { type = "BinaryOp", op = "<=", left = { type = "Var", name = n.var }, right = n.stop }, body = { type = "Block", body = { n.body, { type = "Assign", vars = { { type = "Var", name = n.var } }, values = { { type = "BinaryOp", op = "+", left = { type = "Var", name = n.var }, right = step } } } } } } } } })
+                elseif n.type == "While" then
+                    local si = #instructions + 1; table.insert(break_stack, {})
+                    walk(n.condition); local jn = emit("JMP_IF_FALSE", 0); walk(n.body); emit("JMP", si); instructions[jn].arg = #instructions + 1
+                    local bts = table.remove(break_stack); for _, b in ipairs(bts) do instructions[b].arg = #instructions + 1 end
+                elseif n.type == "Repeat" then
+                    local si = #instructions + 1; table.insert(break_stack, {})
+                    walk(n.body); walk(n.condition); emit("JMP_IF_FALSE", si)
+                    local bts = table.remove(break_stack); for _, b in ipairs(bts) do instructions[b].arg = #instructions + 1 end
+                elseif n.type == "Break" then table.insert(break_stack[#break_stack], emit("JMP", 0))
                 elseif n.type == "Return" then if #n.values == 1 and (n.values[1].type == "Call" or n.values[1].type == "MemberCall" or n.values[1].type == "Vararg") then walk(n.values[1], true); emit("RET_M", 0) else for _, v in ipairs(n.values) do walk(v) end; emit("RET", #n.values) end
                 elseif n.type == "Do" then walk(n.body)
-                elseif n.type == "Break" then emit("BREAK", 0)
+                elseif n.type == "Label" then label_map[n.name] = #instructions + 1
+                elseif n.type == "Goto" then table.insert(goto_stack, { name = n.name, inst = emit("JMP", 0) })
                 elseif n.type == "Index" then walk(n.table); walk(n.key); emit("GETTABLE", 0)
                 elseif n.type == "Table" then
                     emit("NEWTABLE", 0)
                     for i, v in ipairs(n.fields) do if v.key then walk(v.key); walk(v.value); emit("SETTABLE_IMM", 0) else if (i == #n.fields) and (v.value.type == "Call" or v.value.type == "MemberCall" or v.value.type == "Vararg") then walk(v.value, true); emit("SETTABLE_MULTI", 0) else walk(v.value); emit("SETTABLE_IMM", i) end end end
-                elseif n.type == "Vararg" then if multi then emit("VARARG_M", 0) else emit("VARARG", 0) end
+                elseif n.type == "Vararg" then
+                    local sidx = 1; if args then for i, v in ipairs(args) do if v == "..." then sidx = i; break end end end
+                    if multi then emit("VARARG_M", sidx) else emit("VARARG", sidx) end
                 elseif n.type == "FunctionDef" or n.type == "LocalFunction" or n.type == "Function" then local proto = pp(n.body, n.args); emit("CLOSURE", addK(proto)); if n.type == "LocalFunction" or n.type == "Function" then emit("SETVAR", addK(n.name)) end
                 end
             end
-            walk(node); emit("RET", 0); return { instructions = instructions, constants = constants }
+            walk(node); emit("RET", 0)
+            for _, g in ipairs(goto_stack) do if label_map[g.name] then instructions[g.inst].arg = label_map[g.name] end end
+            return { instructions = instructions, constants = constants }
         end
         local mb = pp(ast); local ops = { "LOADK", "GETVAR", "SETVAR", "BINOP", "CALL", "CALL_M", "JMP", "JMP_IF_FALSE", "RET", "RET_M", "SETTABLE", "GETTABLE", "UNOP", "BREAK", "NEWTABLE", "SETTABLE_IMM", "SETTABLE_MULTI", "VARARG", "VARARG_M", "CLOSURE", "LOAD_VA", "PICK_RESULT", "POP" }
         local om = {}; local sh = {}; for i = 1, #ops do sh[i] = i end; for i = #sh, 2, -1 do local j = math.random(i); sh[i], sh[j] = sh[j], sh[i] end; for i, v in ipairs(ops) do om[v] = sh[i] end
         local XK = math.random(1, 0xFFFFFF)
         local function sp(p)
-            local b = {}; for _, v in ipairs(p.instructions) do table.insert(b, (om[v.op] or 0) ~ (XK % 0x100)); local a = v.arg or 0; if type(a) ~= "number" then a = 0 end; table.insert(b, a ~ XK) end
+            local b = {}; for _, v in ipairs(p.instructions) do table.insert(b, (om[v.op] or 0) ~ (XK % 0x100)); local a = v.arg or 0; table.insert(b, a ~ XK) end
             local ks = {}; for _, v in ipairs(p.constants) do if type(v) == "table" and v.instructions then table.insert(ks, sp(v)) else table.insert(ks, v) end end
             return { b = b, k = ks }
         end
@@ -406,34 +455,35 @@ package_preload["wrapper"] = function()
     function Wrapper.generate(main_proto, gm, om, xk)
         local function sk(ks) local s = "{"; for _, v in ipairs(ks) do if type(v) == "string" then s = s .. string.format("%q", v) .. "," elseif type(v) == "boolean" or type(v) == "number" then s = s .. tostring(v) .. "," elseif type(v) == "table" and v.b then s = s .. Wrapper._sp(v) .. "," else s = s .. "nil," end end; return s .. "}" end
         function Wrapper._sp(p) return string.format("{b={%s}, k=%s}", table.concat(p.b, ","), sk(p.k)) end
-        local ms = Wrapper._sp(main_proto); local gms = "{"; for k, v in pairs(gm) do gms = gms .. string.format("[%q] = %s,", k, v) end; gms = gms .. "}"
+        local ms = Wrapper._sp(main_proto); local gms = "{"; for k, v in pairs(gm) do gms = gms .. string.format("[%q] = %q,", k, v) end; gms = gms .. "}"
         local ocs = {}; local rm = {}; for k, v in pairs(om) do rm[v] = k end
         for i = 1, #rm do local op = rm[i]; local c = ""
             if op == "LOADK" then c = "_S[#_S+1] = _K[_AR]; _ST = 1"
-            elseif op == "GETVAR" then c = [[local _N = _K[_AR]; local _VAL = _V[_N]; if _VAL == nil and _UP then local _curr = _UP; while _curr do if _curr.v[_N] ~= nil then _VAL = _curr.v[_N]; break end; _curr = _curr.up end end; _S[#_S+1] = _VAL or _ENV_MAP[_N] or _G[_N]; _ST = 1]]
-            elseif op == "SETVAR" then c = [[local _N = _K[_AR]; local _VAL = _S[#_S]; _S[#_S] = nil; local _found = false; if _V[_N] ~= nil then _V[_N] = _VAL; _found = true elseif _UP then local _curr = _UP; while _curr do if _curr.v[_N] ~= nil then _curr.v[_N] = _VAL; _found = true; break end; _curr = _curr.up end end; if not _found then _V[_N] = _VAL end; _ST = 1]]
+            elseif op == "GETVAR" then c = [[local _N = _K[_AR]; local _VAL = _V[_N]; if _VAL == nil and _UP then local _curr = _UP; while _curr do if _curr.v[_N] ~= nil then _VAL = _curr.v[_N]; break end; _curr = _curr.up end end; if _VAL == nil then _VAL = _G[_ENV_MAP[_N] or _N] end; _S[#_S+1] = _VAL; _ST = 1]]
+            elseif op == "SETVAR" then c = [[local _N = _K[_AR]; local _VAL = _S[#_S]; _S[#_S] = nil; local _found = false; if _V[_N] ~= nil then _V[_N] = _VAL; _found = true elseif _UP then local _curr = _UP; while _curr do if _curr.v[_N] ~= nil then _curr.v[_N] = _VAL; _found = true; break end; _curr = _curr.up end end; if not _found then _G[_ENV_MAP[_N] or _N] = _VAL end; _ST = 1]]
             elseif op == "BINOP" then c = [[local _R = _S[#_S]; _S[#_S] = nil; local _L = _S[#_S]; _S[#_S] = nil; local _ON = _K[_AR]; if _ON == "+" then _S[#_S+1] = _L + _R elseif _ON == "-" then _S[#_S+1] = _L - _R elseif _ON == "*" then _S[#_S+1] = _L * _R elseif _ON == "/" then _S[#_S+1] = _L / _R elseif _ON == ".." then _S[#_S+1] = _L .. _R elseif _ON == "==" then _S[#_S+1] = _L == _R elseif _ON == "~=" then _S[#_S+1] = _L ~= _R elseif _ON == "<" then _S[#_S+1] = _L < _R elseif _ON == ">" then _S[#_S+1] = _L > _R elseif _ON == "<=" then _S[#_S+1] = _L <= _R elseif _ON == ">=" then _S[#_S+1] = _L >= _R elseif _ON == "%" then _S[#_S+1] = _L % _R elseif _ON == "&" then _S[#_S+1] = _L & _R elseif _ON == "|" then _S[#_S+1] = _L | _R elseif _ON == "~" then _S[#_S+1] = _L ~ _R elseif _ON == "<<" then _S[#_S+1] = _L << _R elseif _ON == ">>" then _S[#_S+1] = _L >> _R elseif _ON == "//" then _S[#_S+1] = _L // _R end; _ST = 1]]
             elseif op == "UNOP" then c = [[local _O = _S[#_S]; _S[#_S] = nil; local _ON = _K[_AR]; if _ON == "-" then _S[#_S+1] = -_O elseif _ON == "not" then _S[#_S+1] = not _O elseif _ON == "#" then _S[#_S+1] = #_O elseif _ON == "~" then _S[#_S+1] = ~_O end; _ST = 1]]
-            elseif op == "CALL" then c = [[local _AS = {}; for _i = 1, _AR do local _V = _S[#_S]; _S[#_S] = nil; if type(_V) == "table" and _V._M then for _j = _V.n, 1, -1 do table.insert(_AS, 1, _V[_j]) end else table.insert(_AS, 1, _V) end end; local _F = _S[#_S]; _S[#_S] = nil; local _RE = table.pack(_F(table.unpack(_AS))); _S[#_S+1] = _RE[1]; _ST = 1]]
-            elseif op == "CALL_M" then c = [[local _AS = {}; for _i = 1, _AR do local _V = _S[#_S]; _S[#_S] = nil; if type(_V) == "table" and _V._M then for _j = _V.n, 1, -1 do table.insert(_AS, 1, _V[_j]) end else table.insert(_AS, 1, _V) end end; local _F = _S[#_S]; _S[#_S] = nil; local _RE = table.pack(_F(table.unpack(_AS))); _RE._M = true; _S[#_S+1] = _RE; _ST = 1]]
+            elseif op == "CALL" then c = [[local _AS = {}; for _i = 1, _AR do local _V = _S[#_S]; _S[#_S] = nil; if type(_V) == "table" and _V._M then for _j = _V.n, 1, -1 do table.insert(_AS, 1, _V[_j]) end else table.insert(_AS, 1, _V) end end; local _F = _S[#_S]; _S[#_S] = nil; if not _F then error("Attempt to call nil function") end; local _RE = table.pack(_F(table.unpack(_AS))); _S[#_S+1] = _RE[1]; _ST = 1]]
+            elseif op == "CALL_M" then c = [[local _AS = {}; for _i = 1, _AR do local _V = _S[#_S]; _S[#_S] = nil; if type(_V) == "table" and _V._M then for _j = _V.n, 1, -1 do table.insert(_AS, 1, _V[_j]) end else table.insert(_AS, 1, _V) end end; local _F = _S[#_S]; _S[#_S] = nil; if not _F then error("Attempt to call nil function") end; local _RE = table.pack(_F(table.unpack(_AS))); _RE._M = true; _S[#_S+1] = _RE; _ST = 1]]
             elseif op == "JMP" then c = "_P = (_AR - 1) * 2 + 1; _ST = 1"
             elseif op == "JMP_IF_FALSE" then c = "local _C = _S[#_S]; _S[#_S] = nil; if not _C then _P = (_AR - 1) * 2 + 1 end; _ST = 1"
             elseif op == "RET" then c = "local _RE = {}; for _i=1, _AR do _RE[_AR-_i+1] = _S[#_S]; _S[#_S] = nil end; return table.unpack(_RE)"
             elseif op == "RET_M" then c = "local _RE = _S[#_S]; _S[#_S] = nil; return table.unpack(_RE, 1, _RE.n)"
-            elseif op == "BREAK" then c = "_ST = 0"
             elseif op == "NEWTABLE" then c = "_S[#_S+1] = {}; _ST = 1"
             elseif op == "SETTABLE_IMM" then c = [[local _V = _S[#_S]; _S[#_S] = nil; if type(_V) == "table" and _V._M then local _T = _S[#_S]; for _j = 1, _V.n do _T[#_T+1] = _V[_j] end else if _AR == 0 then local _K = _S[#_S]; _S[#_S] = nil; local _T = _S[#_S]; _T[_K] = _V else local _T = _S[#_S]; _T[_AR] = _V end end; _ST = 1]]
-            elseif op == "SETTABLE_MULTI" then c = [[local _V = _S[#_S]; _S[#_S] = nil; local _T = _S[#_S]; if type(_V) == "table" and _V._M then for _j = _V.n, 1, -1 do _T[#_T+1] = _V[_j] end else _T[#_T+1] = _V end; _ST = 1]]
+            elseif op == "SETTABLE_MULTI" then c = [[local _V = _S[#_S]; _S[#_S] = nil; local _T = _S[#_S]; if type(_V) == "table" and _V._M then for _j = 1, _V.n do table.insert(_T, _V[_j]) end else table.insert(_T, _V) end; _ST = 1]]
             elseif op == "SETTABLE" then c = "local _K = _S[#_S]; _S[#_S] = nil; local _T = _S[#_S]; _S[#_S] = nil; local _V = _S[#_S]; _S[#_S] = nil; _T[_K] = _V; _ST = 1"
             elseif op == "GETTABLE" then c = "local _K = _S[#_S]; _S[#_S] = nil; local _T = _S[#_S]; _S[#_S] = nil; _S[#_S+1] = _T[_K]; _ST = 1"
-            elseif op == "VARARG" then c = "_S[#_S+1] = _VA[1]; _ST = 1"
-            elseif op == "VARARG_M" then c = "local _PK = table.pack(table.unpack(_VA)); _PK._M = true; _S[#_S+1] = _PK; _ST = 1"
+            elseif op == "VARARG" then c = [[local _PK = {}; for _i=_AR, _VA.n do table.insert(_PK, _VA[_i]) end; _S[#_S+1] = _PK[1]; _ST = 1]]
+            elseif op == "VARARG_M" then c = [[local _PK = {n=0}; for _i=_AR, _VA.n do _PK.n = _PK.n + 1; _PK[_PK.n] = _VA[_i] end; _PK._M = true; _S[#_S+1] = _PK; _ST = 1]]
             elseif op == "LOAD_VA" then c = "_S[#_S+1] = _VA[_AR]; _ST = 1"
-            elseif op == "PICK_RESULT" then c = "local _RE = _S[#_S]; _S[#_S+1] = _RE[_AR]; _ST = 1"
+            elseif op == "PICK_RESULT" then c = [[local _R = _S[#_S]; if not _R then error("PICK_RESULT: stack top is nil") end; _S[#_S+1] = _R[_AR]; _ST = 1]]
             elseif op == "POP" then c = "for _i=1, _AR do _S[#_S] = nil end; _ST = 1"
             elseif op == "CLOSURE" then c = "local _PR = _K[_AR]; _S[#_S+1] = function(...) return _EXEC(_PR, {v=_V, up=_UP}, ...) end; _ST = 1"
             else c = "_ST = 1" end
-            table.insert(ocs, string.format("elseif _ST == %d then -- %s\n            %s", i + 1, op or "NONE", c))
+            table.insert(ocs, string.format([[
+        elseif _ST == %d then -- %s
+            %s]], i + 1, op or "NONE", c))
         end
         return string.format([[
 local _ENV_MAP = %s
@@ -455,7 +505,7 @@ local function _EXEC(_PR, _UP, ...)
         else _ST = 0 end
     end
 end
-_EXEC(_MAIN, nil, ...)]], gms, ms, xk, table.concat(ocs, "\n        "))
+return _EXEC(_MAIN, nil, ...)]], gms, ms, xk, table.concat(ocs, ""))
     end
     return Wrapper
 end
@@ -465,7 +515,11 @@ local function require_int(name)
     return package_preload[name]()
 end
 
-local Lexer = require_int("lexer"); local Parser = require_int("parser"); local Obfuscator = require_int("obfuscator"); local Virtualizer = require_int("virtualizer"); local Wrapper = require_int("wrapper")
+local Lexer = require_int("lexer")
+local Parser = require_int("parser")
+local Obfuscator = require_int("obfuscator")
+local Virtualizer = require_int("virtualizer")
+local Wrapper = require_int("wrapper")
 
 btn_start.onClick = function()
     local input_file = tostring(edit_input.text)
@@ -490,19 +544,22 @@ btn_start.onClick = function()
         local parser = Parser.new(tokens)
         local ast = parser:parse()
 
-        log("步骤 2: 控制流平展...")
+        log("步骤 2: 脱糖处理...")
+        ast = Obfuscator.desugar(ast)
+
+        log("步骤 3: 控制流平展...")
         Obfuscator.flattenControlFlow(ast)
 
-        log("步骤 3: 注入假分支...")
+        log("步骤 4: 注入假分支...")
         Obfuscator.injectFakeBranches(ast)
 
-        log("步骤 4: 标识符混淆...")
+        log("步骤 5: 标识符混淆...")
         local global_map = Obfuscator.obfuscateIdentifiers(ast)
 
-        log("步骤 5: 指令虚拟化...")
+        log("步骤 6: 指令虚拟化...")
         local main_proto, op_map, xor_key = Virtualizer.virtualize(ast)
 
-        log("步骤 6: 生成输出文件...")
+        log("步骤 7: 生成输出文件...")
         local final_code = Wrapper.generate(main_proto, global_map, op_map, xor_key)
 
         local out = io.open(output_file, "w")
