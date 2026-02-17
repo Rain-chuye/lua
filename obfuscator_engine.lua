@@ -40,7 +40,6 @@ function Lexer:tokenize()
                         while self:peek() ~= "}" do hex = hex .. self:consume() end
                         self:consume()
                         local code = tonumber(hex, 16)
-                        -- Simple UTF-8 encoding
                         if code < 0x80 then table.insert(res, string.char(code))
                         elseif code < 0x800 then table.insert(res, string.char(0xC0 + math.floor(code / 0x40), 0x80 + (code % 0x40)))
                         elseif code < 0x10000 then table.insert(res, string.char(0xE0 + math.floor(code / 0x1000), 0x80 + (math.floor(code / 0x40) % 0x40), 0x80 + (code % 0x40)))
@@ -350,7 +349,6 @@ function Obfuscator.applyMBA(ast)
         elseif n.type == "UnaryOp" then
             n.right = walk(n.right)
             if n.op == "~" and math.random() > 0.5 then
-                -- ~x = -x - 1
                 return { type = "BinaryOp", op = "-", left = { type = "UnaryOp", op = "-", right = copy(n.right) }, right = { type = "Number", value = "1" } }
             end
         elseif n.type == "BinaryOp" then
@@ -398,7 +396,7 @@ function Obfuscator.obfuscateIdentifiers(ast)
         elseif n.type == "Index" then walk(n.table, s); walk(n.key, s)
         elseif n.type == "Table" then for _, f in ipairs(n.fields) do if f.key then walk(f.key, s) end; walk(f.value, s) end
         elseif n.type == "Return" then for _, v in ipairs(n.values) do walk(v, s) end
-        elseif n.type == "Goto" or n.type == "Label" then -- ignore for now
+        elseif n.type == "Goto" or n.type == "Label" then
         end
     end; walk(ast, { locals = {} }); return gm
 end
@@ -406,10 +404,6 @@ local Virtualizer = {}
 function Virtualizer.virtualize(ast, gm)
     local ops_list = { "LOADK", "GETVAR", "SETVAR", "GETTABLE", "SETTABLE", "SETTABLE_IMM", "SETTABLE_MULTI", "NEWTABLE", "CALL", "CALL_M", "RET", "RET_M", "VARARG", "VARARG_M", "JMP", "JMP_IF_FALSE", "JMP_IF_TRUE", "ADD", "SUB", "MUL", "DIV", "MOD", "EQ", "NE", "LT", "GT", "LE", "GE", "CONCAT", "NOT", "LEN", "UNM", "AND", "OR", "CLOSURE", "LOAD_VA", "PICK_RESULT", "POP", "DUP", "SWAP", "BREAK", "BOR", "BXOR", "BAND", "SHL", "SHR", "IDIV", "BNOT", "NOP" }
     local XK = math.random(1, 0xFFFFFF); local SX = math.random(1, 255)
-    local function xor_s(s, k)
-        if type(s) ~= "string" then return s end
-        local r = {}; for i=1, #s do table.insert(r, string.char(s:byte(i) ~ k)) end; return table.concat(r)
-    end
     local function encrypt_k(v, k)
         local s
         if type(v) == "string" then s = "s" .. v
@@ -417,7 +411,7 @@ function Virtualizer.virtualize(ast, gm)
         elseif type(v) == "boolean" then s = "b" .. (v and "t" or "f")
         elseif v == nil then s = "x"
         end
-        return xor_s(s, k)
+        local r = {}; for i=1, #s do table.insert(r, string.char(s:byte(i) ~ k)) end; return table.concat(r)
     end
     local function pp(block, args)
         local instructions = {}; local constants = { n = 0 }; local loop_exits = {}; local locals_map = {}
@@ -493,10 +487,8 @@ function Virtualizer.virtualize(ast, gm)
         end
         for _, op in ipairs(ops_list) do get_id(op) end
         while current_id < 150 do id_to_op[current_id] = "NOP"; current_id = current_id + 1 end
-
         local b = {}; for _, v in ipairs(p.b) do
-            local op_id = get_id(v.op)
-            table.insert(b, op_id ~ (XK % 256)); table.insert(b, (v.arg or 0) ~ XK)
+            local op_id = get_id(v.op); table.insert(b, op_id ~ (XK % 256)); table.insert(b, (v.arg or 0) ~ XK)
         end
         local ks = { n = p.k.n }; for i = 1, p.k.n do local v = p.k[i]
             if type(v) == "table" and v.b then ks[i] = sp(v) else ks[i] = encrypt_k(v, SX) end
@@ -506,19 +498,22 @@ function Virtualizer.virtualize(ast, gm)
 end
 local Wrapper = {}
 function Wrapper.generate(main, xk, om, gm, sx, integrity)
+    local function es(s)
+        if type(s) ~= "string" then return tostring(s) end
+        local res = {}; for i=1, #s do table.insert(res, "\\" .. s:byte(i)) end
+        return "\"" .. table.concat(res) .. "\""
+    end
     local function sk(ks) local s = "{"; for i=1, (ks.n or #ks) do local v = ks[i]
-        if type(v) == "string" then
-            local res = {}; for j=1, #v do table.insert(res, string.format("\\%d", v:byte(j))) end
-            s = s .. "\"" .. table.concat(res) .. "\","
+        if type(v) == "string" then s = s .. es(v) .. ","
         elseif type(v) == "boolean" or type(v) == "number" then s = s .. tostring(v) .. ","
         elseif type(v) == "table" and v.b then s = s .. Wrapper._sp(v) .. ","
         else s = s .. "nil," end end; return s .. "}" end
-    local function sm(m) local s = "{"; for k, v in pairs(m) do s = s .. "[" .. k .. "]=" .. string.format("%q", v) .. "," end; return s .. "}" end
+    local function sm(m) local s = "{"; for k, v in pairs(m) do s = s .. "[" .. k .. "]=" .. es(v) .. "," end; return s .. "}" end
     function Wrapper._sp(p)
         local h = 0; for i=1, #p.b do h = (h + p.b[i]) % 0xFFFFFFFF end
         return "{b={" .. table.concat(p.b, ",") .. "},k=" .. sk(p.k) .. ",l=" .. sk(p.l) .. ",m=" .. sm(p.m) .. ",h=" .. h .. "}"
     end
-    local gms = "{"; for k, v in pairs(gm) do gms = gms .. string.format("[%q]=%q,", k, v) .. "" end; gms = gms .. "}"
+    local gms = "{"; for k, v in pairs(gm) do gms = gms .. "[" .. es(k) .. "]=" .. es(v) .. "," end; gms = gms .. "}"
 
     local op_codes = {
         LOADK = "_SS = _SS + 1; _S[_SS] = _D(_K[_AR]); _VM_ST = _DIS",
@@ -575,7 +570,6 @@ function Wrapper.generate(main, xk, om, gm, sx, integrity)
     local states = {}
     local dis_id = math.random(100, 1000)
     local op_to_state = {}
-    local curr_state = 1
     local all_ops = {}
     for op, _ in pairs(op_codes) do table.insert(all_ops, op) end
     table.sort(all_ops)
@@ -589,7 +583,7 @@ function Wrapper.generate(main, xk, om, gm, sx, integrity)
 
     local dispatcher_cases = {}
     for op, sid in pairs(op_to_state) do
-        table.insert(dispatcher_cases, string.format("_OPN == %q then _VM_ST = %d", op, sid))
+        table.insert(dispatcher_cases, string.format("_OPN == %s then _VM_ST = %d", es(op), sid))
     end
 
     local vm_flattened = {}
@@ -617,10 +611,9 @@ local function _EXEC(_PR, _UP, ...)
     local _V = {}
     local function _D(_V)
         if type(_V) ~= "string" then return _V end
-        local _R = ""
-        for _i=1, #_V do _R = _R .. string.char(_V:byte(_i) ~ _SX) end
-        local _T = _R:sub(1,1)
-        local _VAL = _R:sub(2)
+        local _R = {}; for _i=1, #_V do table.insert(_R, string.char(_V:byte(_i) ~ _SX)) end
+        local _RS = table.concat(_R)
+        local _T = _RS:sub(1,1); local _VAL = _RS:sub(2)
         if _T == "s" then return _VAL
         elseif _T == "n" then return tonumber(_VAL)
         elseif _T == "b" then return _VAL == "t"
