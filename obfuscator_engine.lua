@@ -89,7 +89,7 @@ function Lexer:expect_char(c) if self:consume() ~= c then error("Expected " .. c
 
 local Parser = {}
 function Parser.new(tokens) return setmetatable({ tokens = tokens, pos = 1 }, { __index = Parser }) end
-function Parser:peek() return self.tokens[self.pos] end
+function Parser:peek(n) return self.tokens[self.pos + (n or 0)] end
 function Parser:consume() local t = self:peek(); self.pos = self.pos + 1; return t end
 function Parser:expect(v) local t = self:consume(); if not t or (t.value ~= v and t.type ~= v) then error("Line " .. (t and t.line or "unknown") .. ": expected " .. v .. " but got " .. (t and t.value or "nil")) end; return t end
 function Parser:parse() return self:parseBlock() end
@@ -427,6 +427,7 @@ function Virtualizer.virtualize(ast, gm)
                 elseif jtype == 2 then table.insert(instructions, { op = "JMP", arg = #instructions + 2 })
                 elseif jtype == 3 then table.insert(instructions, { op = "NOP", arg = 0 }) end
             end
+            if math.random(1, 100) > 80 then table.insert(instructions, { op = "NOP", arg = 0 }) end
             table.insert(instructions, { op = op, arg = arg }); return #instructions
         end
         if args then for i, arg in ipairs(args) do if arg ~= "..." then emit("LOAD_VA", i); emit("SETVAR", addK(arg)); locals_map[arg] = true end end end
@@ -480,6 +481,13 @@ function Virtualizer.virtualize(ast, gm)
         for _, g in ipairs(gotos) do if labels[g.name] then instructions[g.inst].arg = labels[g.name] else error("Label " .. g.name .. " not found") end end
         local locals_list = {}; for k in pairs(locals_map) do table.insert(locals_list, k) end; return { b = instructions, k = constants, l = locals_list }
     end
+    local arg_width = math.random(16, 24)
+    local pack_params = {
+        op_shift = arg_width,
+        arg_mask = (1 << arg_width) - 1,
+        xor_key = math.random(0x100000, 0xFFFFFF),
+        mult = math.random(3, 17) * 2 + 1
+    }
     local main_proto = pp(ast); local function sp(p)
         local op_map = {}; local id_to_op = {}; local current_id = 1
         local function get_id(op)
@@ -489,21 +497,24 @@ function Virtualizer.virtualize(ast, gm)
             return op_map[op][math.random(1, #op_map[op])]
         end
         for _, op in ipairs(ops_list) do get_id(op) end
-        while current_id < 150 do id_to_op[current_id] = "NOP"; current_id = current_id + 1 end
+        while current_id < 200 do id_to_op[current_id] = "NOP"; current_id = current_id + 1 end
         local b = {}; for _, v in ipairs(p.b) do
             local op_id = get_id(v.op)
-            local packed = (op_id ~ (XK % 256)) + ((v.arg or 0) ~ XK) * 256
-            table.insert(b, packed)
+            local arg = v.arg or 0
+            local packed = ((op_id << pack_params.op_shift) | (arg & pack_params.arg_mask)) ~ pack_params.xor_key ~ (#b + 1)
+            table.insert(b, packed * pack_params.mult)
         end
         local ks = { n = p.k.n }; for i = 1, p.k.n do local v = p.k[i]
             if type(v) == "table" and v.b then ks[i] = sp(v) else ks[i] = encrypt_k(v, SX) end
         end
         local ls = {}; for _, v in ipairs(p.l) do table.insert(ls, encrypt_k(v, SX)) end; return { b = b, k = ks, l = ls, m = id_to_op }
-    end; local egm = {}; for k, v in pairs(gm) do egm[k] = encrypt_k(v, SX) end; return sp(main_proto), XK, ops_list, egm, SX
+    end
+    local egm = {}; for k, v in pairs(gm) do egm[k] = encrypt_k(v, SX) end
+    return sp(main_proto), XK, ops_list, egm, SX, pack_params
 end
 
 local Wrapper = {}
-function Wrapper.generate(main, xk, om, gm, sx, integrity)
+function Wrapper.generate(main, xk, om, gm, sx, integrity, pack_params)
     local vmap = {}
     local function gv(n) if not vmap[n] then vmap[n] = string.format("_0x%X", math.random(0x1000, 0xFFFF)) end; return vmap[n] end
     local function es(s)
@@ -517,6 +528,8 @@ function Wrapper.generate(main, xk, om, gm, sx, integrity)
         elseif type(v) == "table" and v.b then s = s .. Wrapper._sp(v) .. ","
         else s = s .. "nil," end end; return s .. "}" end
     local function sm(m) local s = "{"; for k, v in pairs(m) do s = s .. "[" .. k .. "]=" .. es(v) .. "," end; return s .. "}" end
+    local girt_map = {}
+    local function gg(f) if not girt_map[f] then girt_map[f] = f end; return girt_map[f] end
     function Wrapper._sp(p)
         local h = 0; for i=1, #p.b do h = (h + p.b[i]) % 0xFFFFFFFF end
         local r_off = math.random(1, 100); local seed = math.random(1, 1000000)
@@ -531,29 +544,30 @@ function Wrapper.generate(main, xk, om, gm, sx, integrity)
         else return "(" .. a .. " + " .. oc(tonumber(b) or 0) .. ")" end
     end
     local function mba_sub(a, b) return "((" .. a .. " ~ " .. b .. ") - 2 * ( ~" .. a .. " & " .. b .. "))" end
-    local function sa(idx) return vmap["_S"] .. "[" .. mba_add(idx, oc(0)) .. "]" end
+    local function sa(idx) return gv("_S") .. "[" .. mba_add(idx, oc(0)) .. "]" end
 
     local v_stack, v_ss, v_p, v_st, v_ar = gv("_S"), gv("_SS"), gv("_P"), gv("_VM_ST"), gv("_AR")
     local v_pr, v_up, v_b, v_k, v_l, v_m, v_va, v_v = gv("_PR"), gv("_UP"), gv("_B"), gv("_K"), gv("_L"), gv("_M"), gv("_VA"), gv("_V")
     local v_dis = gv("_DIS"); local v_clk = gv("_CLK"); local v_d = gv("_D")
     local v_env_map, v_x, v_sx, v_env, v_nil = gv("_ENV_MAP"), gv("_X"), gv("_SX"), gv("_ENV"), gv("_NIL")
     local v_exec = gv("_EXEC")
+    local v_girt = gv("_GIRT")
     local dis_id = math.random(100, 1000)
 
     local op_codes = {
         LOADK = v_ss .. " = " .. mba_add(v_ss, "1") .. "; " .. sa(v_ss) .. " = " .. v_d .. "(" .. v_k .. "[" .. v_ar .. "]); " .. v_st .. " = " .. dis_id,
-        GETVAR = "local _N = " .. v_d .. "(" .. v_k .. "[" .. v_ar .. "]); local _VAL = " .. v_v .. "[_N]; if _VAL ~= nil then if _VAL == " .. v_nil .. " then _VAL = nil end elseif " .. v_env_map .. "[_N] then _VAL = " .. v_env .. "[" .. v_d .. "(" .. v_env_map .. "[_N])] elseif " .. v_up .. " then local _curr = " .. v_up .. "; while _curr do if _curr.v[_N] ~= nil then _VAL = _curr.v[_N]; if _VAL == " .. v_nil .. " then _VAL = nil end; break end; _curr = _curr.up end end; " .. v_ss .. " = " .. mba_add(v_ss, "1") .. "; " .. sa(v_ss) .. " = _VAL; " .. v_st .. " = " .. dis_id,
-        SETVAR = "local _N = " .. v_d .. "(" .. v_k .. "[" .. v_ar .. "]); local _VAL = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; if " .. v_v .. "[_N] ~= nil then " .. v_v .. "[_N] = (_VAL == nil and " .. v_nil .. " or _VAL) elseif " .. v_env_map .. "[_N] then " .. v_env .. "[" .. v_d .. "(" .. v_env_map .. "[_N])] = _VAL else local _curr, _f = " .. v_up .. ", false; while _curr do if _curr.v[_N] ~= nil then _curr.v[_N] = (_VAL == nil and " .. v_nil .. " or _VAL); _f = true; break end; _curr = _curr.up end if not _f then " .. v_v .. "[_N] = (_VAL == nil and " .. v_nil .. " or _VAL) end end; " .. v_st .. " = " .. dis_id,
+        GETVAR = "local _N = " .. v_d .. "(" .. v_k .. "[" .. v_ar .. "]); local _VAL = " .. v_v .. "[_N]; if _VAL ~= nil then if _VAL == " .. v_nil .. " then _VAL = nil end elseif " .. v_env_map .. "[_N] then local _EN = " .. v_d .. "(" .. v_env_map .. "[_N]); if " .. v_girt .. "[_EN] then _VAL = " .. v_girt .. "[_EN] else _VAL = " .. v_env .. "[_EN] end elseif " .. v_up .. " then local _curr = " .. v_up .. "; while _curr do if _curr.v[_N] ~= nil then _VAL = _curr.v[_N]; if _VAL == " .. v_nil .. " then _VAL = nil end; break end; _curr = _curr.up end end; " .. v_ss .. " = " .. mba_add(v_ss, "1") .. "; " .. sa(v_ss) .. " = _VAL; " .. v_st .. " = " .. dis_id,
+        SETVAR = "local _N = " .. v_d .. "(" .. v_k .. "[" .. v_ar .. "]); local _VAL = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; if " .. v_v .. "[_N] ~= nil then " .. v_v .. "[_N] = (_VAL == nil and " .. v_nil .. " or _VAL) elseif " .. v_env_map .. "[_N] then local _EN = " .. v_d .. "(" .. v_env_map .. "[_N]); " .. v_env .. "[_EN] = _VAL else local _curr, _f = " .. v_up .. ", false; while _curr do if _curr.v[_N] ~= nil then _curr.v[_N] = (_VAL == nil and " .. v_nil .. " or _VAL); _f = true; break end; _curr = _curr.up end if not _f then " .. v_v .. "[_N] = (_VAL == nil and " .. v_nil .. " or _VAL) end end; " .. v_st .. " = " .. dis_id,
         GETTABLE = "local _K = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; local _T = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; " .. v_ss .. " = " .. mba_add(v_ss, "1") .. "; " .. sa(v_ss) .. " = _T[_K]; " .. v_st .. " = " .. dis_id,
         SETTABLE = "local _K = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; local _T = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; local _VAL = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; _T[_K] = _VAL; " .. v_st .. " = " .. dis_id,
         SETTABLE_IMM = "local _VAL = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; if " .. v_ar .. " == 0 then local _K = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; local _T = " .. sa(v_ss) .. "; _T[_K] = _VAL else local _T = " .. sa(v_ss) .. "; _T[" .. v_ar .. "] = _VAL end; " .. v_st .. " = " .. dis_id,
-        SETTABLE_MULTI = "local _VAL = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; local _T = " .. sa(v_ss) .. "; if type(_VAL) == 'table' and _VAL._M then for _j = 1, _VAL.n do table.insert(_T, _VAL[_j]) end else table.insert(_T, _VAL) end; " .. v_st .. " = " .. dis_id,
+        SETTABLE_MULTI = "local _VAL = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; local _T = " .. sa(v_ss) .. "; if " .. v_girt .. "[" .. es(gg("type")) .. "](_VAL) == 'table' and _VAL._M then for _j = 1, _VAL.n do " .. v_girt .. "[" .. es(gg("table.insert")) .. "](_T, _VAL[_j]) end else " .. v_girt .. "[" .. es(gg("table.insert")) .. "](_T, _VAL) end; " .. v_st .. " = " .. dis_id,
         NEWTABLE = v_ss .. " = " .. mba_add(v_ss, "1") .. "; " .. sa(v_ss) .. " = {}; " .. v_st .. " = " .. dis_id,
-        CALL = "local _AS = {n=0}; for _i = 1, " .. v_ar .. " do local _V = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; if type(_V) == 'table' and _V._M then for _j = _V.n, 1, -1 do table.insert(_AS, 1, _V[_j]); _AS.n = " .. mba_add("_AS.n", "1") .. " end else table.insert(_AS, 1, _V); _AS.n = " .. mba_add("_AS.n", "1") .. " end end local _F = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; local _RE = table.pack(_F(table.unpack(_AS, 1, _AS.n))); " .. v_ss .. " = " .. mba_add(v_ss, "1") .. "; " .. sa(v_ss) .. " = _RE[1]; " .. v_st .. " = " .. dis_id,
-        CALL_M = "local _AS = {n=0}; for _i = 1, " .. v_ar .. " do local _V = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; if type(_V) == 'table' and _V._M then for _j = _V.n, 1, -1 do table.insert(_AS, 1, _V[_j]); _AS.n = " .. mba_add("_AS.n", "1") .. " end else table.insert(_AS, 1, _V); _AS.n = " .. mba_add("_AS.n", "1") .. " end end local _F = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; local _RE = table.pack(_F(table.unpack(_AS, 1, _AS.n))); _RE._M = true; " .. v_ss .. " = " .. mba_add(v_ss, "1") .. "; " .. sa(v_ss) .. " = _RE; " .. v_st .. " = " .. dis_id,
-        RET = "local _RE = {}; for _i=1, " .. v_ar .. " do _RE[" .. mba_sub(mba_add(v_ar, "_i"), "1") .. "] = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. " end " .. v_ss .. " = " .. v_pr .. ".r or 0; return table.unpack(_RE, 1, " .. v_ar .. ")",
-        RET_M = "local _RE = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; return table.unpack(_RE, 1, _RE.n)",
-        VARARG = "local _PK = {}; for _i=" .. v_ar .. ", " .. v_va .. ".n do table.insert(_PK, " .. v_va .. "[_i]) end; " .. v_ss .. " = " .. mba_add(v_ss, "1") .. "; " .. sa(v_ss) .. " = _PK[1]; " .. v_st .. " = " .. dis_id,
+        CALL = "local _AS = {n=0}; for _i = 1, " .. v_ar .. " do local _V = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; if " .. v_girt .. "[" .. es(gg("type")) .. "](_V) == 'table' and _V._M then for _j = _V.n, 1, -1 do " .. v_girt .. "[" .. es(gg("table.insert")) .. "](_AS, 1, _V[_j]); _AS.n = " .. mba_add("_AS.n", "1") .. " end else " .. v_girt .. "[" .. es(gg("table.insert")) .. "](_AS, 1, _V); _AS.n = " .. mba_add("_AS.n", "1") .. " end end local _F = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; local _RE = " .. v_girt .. "[" .. es(gg("table.pack")) .. "](_F(" .. v_girt .. "[" .. es(gg("table.unpack")) .. "](_AS, 1, _AS.n))); " .. v_ss .. " = " .. mba_add(v_ss, "1") .. "; " .. sa(v_ss) .. " = _RE[1]; " .. v_st .. " = " .. dis_id,
+        CALL_M = "local _AS = {n=0}; for _i = 1, " .. v_ar .. " do local _V = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; if " .. v_girt .. "[" .. es(gg("type")) .. "](_V) == 'table' and _V._M then for _j = _V.n, 1, -1 do " .. v_girt .. "[" .. es(gg("table.insert")) .. "](_AS, 1, _V[_j]); _AS.n = " .. mba_add("_AS.n", "1") .. " end else " .. v_girt .. "[" .. es(gg("table.insert")) .. "](_AS, 1, _V); _AS.n = " .. mba_add("_AS.n", "1") .. " end end local _F = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; local _RE = " .. v_girt .. "[" .. es(gg("table.pack")) .. "](_F(" .. v_girt .. "[" .. es(gg("table.unpack")) .. "](_AS, 1, _AS.n))); _RE._M = true; " .. v_ss .. " = " .. mba_add(v_ss, "1") .. "; " .. sa(v_ss) .. " = _RE; " .. v_st .. " = " .. dis_id,
+        RET = "local _RE = {}; for _i=1, " .. v_ar .. " do " .. v_girt .. "[" .. es("table.insert") .. "](_RE, 1, " .. sa(v_ss) .. "); " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. " end " .. v_ss .. " = " .. v_pr .. ".r or 0; return " .. v_girt .. "[" .. es("table.unpack") .. "](_RE, 1, " .. v_ar .. ")",
+        RET_M = "local _RE = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; return " .. v_girt .. "[" .. es(gg("table.unpack")) .. "](_RE, 1, _RE.n)",
+        VARARG = "local _PK = {}; for _i=" .. v_ar .. ", " .. v_va .. ".n do " .. v_girt .. "[" .. es(gg("table.insert")) .. "](_PK, " .. v_va .. "[_i]) end; " .. v_ss .. " = " .. mba_add(v_ss, "1") .. "; " .. sa(v_ss) .. " = _PK[1]; " .. v_st .. " = " .. dis_id,
         VARARG_M = "local _PK = {n=0}; for _i=" .. v_ar .. ", " .. v_va .. ".n do _PK.n = " .. mba_add("_PK.n", "1") .. "; _PK[_PK.n] = " .. v_va .. "[_i] end; _PK._M = true; " .. v_ss .. " = " .. mba_add(v_ss, "1") .. "; " .. sa(v_ss) .. " = _PK; " .. v_st .. " = " .. dis_id,
         JMP = v_p .. " = " .. v_ar .. "; " .. v_st .. " = " .. dis_id,
         JMP_IF_FALSE = "local _V = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; if not _V then " .. v_p .. " = " .. v_ar .. " end; " .. v_st .. " = " .. dis_id,
@@ -620,7 +634,9 @@ function Wrapper.generate(main, xk, om, gm, sx, integrity)
     local vm_flattened = {}
     table.insert(vm_flattened, string.format("elseif (" .. v_st .. " ~ %d) == 0 then", dis_id))
     table.insert(vm_flattened, "if " .. v_p .. " > #" .. v_b .. " or (os.clock() - " .. v_clk .. " > 15.0) then " .. v_st .. " = 0 else")
-    table.insert(vm_flattened, "local _PCK = " .. v_b .. "[" .. v_p .. "]; " .. v_p .. " = " .. mba_add(v_p, "1") .. "; local _OPI = (_PCK % 256) ~ (" .. v_x .. " % 256); " .. v_ar .. " = math.floor(_PCK / 256) ~ " .. v_x .. "; local _OPN = " .. v_m .. "[_OPI]")
+    table.insert(vm_flattened, "local _PCK = " .. v_b .. "[" .. v_p .. "] / " .. pack_params.mult .. "; local _IP = " .. v_p .. "; " .. v_p .. " = " .. mba_add(v_p, "1") .. "; ")
+    table.insert(vm_flattened, "local _DP = _PCK ~ " .. pack_params.xor_key .. " ~ _IP; ")
+    table.insert(vm_flattened, v_ar .. " = _DP & " .. pack_params.arg_mask .. "; local _OPI = (_DP >> " .. pack_params.op_shift .. ") & 0xFF; local _OPN = " .. v_m .. "[_OPI]")
     table.insert(vm_flattened, "if " .. table.concat(dispatcher_cases, " elseif ") .. " else " .. v_st .. " = 0 end end")
 
     local state_ids = {}
@@ -632,7 +648,43 @@ function Wrapper.generate(main, xk, om, gm, sx, integrity)
     end
 
     local gms = "{"; for k, v in pairs(gm) do gms = gms .. "[" .. es(k) .. "]=" .. es(v) .. "," end; gms = gms .. "}"
-    local body = "local " .. v_env_map .. " = " .. gms .. "\n" ..
+    local girt_init = "local " .. v_girt .. " = {}\n"
+    girt_init = girt_init .. "local _SM = getmetatable('')['\\095\\095\\105\\110\\100\\101\\120'] \n"
+    girt_init = girt_init .. v_girt .. "[" .. es("string.char") .. "] = _SM.char\n"
+    girt_init = girt_init .. v_girt .. "[" .. es("string.byte") .. "] = _SM.byte\n"
+    girt_init = girt_init .. v_girt .. "[" .. es("string.sub") .. "] = _SM.sub\n"
+    girt_init = girt_init .. v_girt .. "[" .. es("string.format") .. "] = _SM.format\n"
+    girt_init = girt_init .. v_girt .. "[" .. es("string.match") .. "] = _SM.match\n"
+    girt_init = girt_init .. v_girt .. "[" .. es("string.gmatch") .. "] = _SM.gmatch\n"
+    girt_init = girt_init .. v_girt .. "[" .. es("string.find") .. "] = _SM.find\n"
+    girt_init = girt_init .. v_girt .. "[" .. es("string.len") .. "] = _SM.len\n"
+    girt_init = girt_init .. v_girt .. "[" .. es("table.pack") .. "] = table.pack\n"
+    girt_init = girt_init .. v_girt .. "[" .. es("table.unpack") .. "] = table.unpack\n"
+    girt_init = girt_init .. v_girt .. "[" .. es("table.insert") .. "] = table.insert\n"
+    girt_init = girt_init .. v_girt .. "[" .. es("type") .. "] = type\n"
+    girt_init = girt_init .. v_girt .. "[" .. es("tonumber") .. "] = tonumber\n"
+    girt_init = girt_init .. v_girt .. "[" .. es("tostring") .. "] = tostring\n"
+    girt_init = girt_init .. v_girt .. "[" .. es("os.clock") .. "] = os.clock\n"
+    girt_init = girt_init .. v_girt .. "[" .. es("math.randomseed") .. "] = math.randomseed\n"
+    girt_init = girt_init .. v_girt .. "[" .. es("string") .. "] = _SM\n"
+    girt_init = girt_init .. v_girt .. "[" .. es("math") .. "] = math\n"
+    girt_init = girt_init .. v_girt .. "[" .. es("table") .. "] = table\n"
+    for f, k in pairs(girt_map) do
+        if not f:find("^string%.") and not f:find("^table%.") and f ~= "type" and f ~= "tonumber" and f ~= "tostring" and f ~= "os.clock" and f ~= "math.randomseed" and f ~= "math" and f ~= "os" then
+            local parts = {}; local raw_parts = {}; for p in f:gmatch("[^%.]+") do table.insert(parts, es(p)); table.insert(raw_parts, p) end
+            if #parts == 1 then
+                girt_init = girt_init .. "if not " .. v_girt .. "[" .. es(f) .. "] then " .. v_girt .. "[" .. es(f) .. "] = _G[" .. parts[1] .. "] or " .. raw_parts[1] .. " end\n"
+            else
+                local cur = "(_G[" .. parts[1] .. "] or " .. raw_parts[1] .. ")"
+                for i=2, #parts do cur = cur .. "[" .. parts[i] .. "]" end
+                girt_init = girt_init .. "if not " .. v_girt .. "[" .. es(f) .. "] then " .. v_girt .. "[" .. es(f) .. "] = " .. cur .. " end\n"
+            end
+        end
+    end
+
+    local body = "if (function() local _o = 0; return _o ~= _o end)() then while true do end end\n" ..
+    "local " .. v_env_map .. " = " .. gms .. "\n" ..
+    girt_init ..
     "local " .. v_x .. " = " .. tostring(xk) .. "; local " .. v_sx .. " = " .. tostring(sx) .. "\n" ..
     "local " .. v_env .. " = _G or _ENV\nlocal " .. v_nil .. " = {}\n" ..
     "local function " .. v_exec .. "(" .. v_pr .. ", " .. v_up .. ", ...)\n" ..
@@ -643,19 +695,18 @@ function Wrapper.generate(main, xk, om, gm, sx, integrity)
     "        if _H ~= " .. v_pr .. ".h then error(\"\\073\\110\\116\\101\\103\\114\\105\\116\\121\\032\\067\\104\\101\\099\\107\\032\\070\\097\\105\\108\\101\\100\") end\n" ..
     "    end\n" ..
     "    local " .. v_stack .. ", " .. v_ss .. ", " .. v_p .. ", " .. v_st .. ", " .. v_ar .. " = {}, " .. v_pr .. ".r or 0, 1, " .. dis_id .. ", 0\n" ..
-    "    local " .. v_b .. ", " .. v_k .. ", " .. v_l .. ", " .. v_m .. " = " .. v_pr .. ".b, " .. v_pr .. ".k, " .. v_pr .. ".l, " .. v_pr .. ".m; local " .. v_va .. " = table.pack(...)\n" ..
+    "    local " .. v_b .. ", " .. v_k .. ", " .. v_l .. ", " .. v_m .. " = " .. v_pr .. ".b, " .. v_pr .. ".k, " .. v_pr .. ".l, " .. v_pr .. ".m; local " .. v_va .. " = " .. v_girt .. "[" .. es(gg("table.pack")) .. "](...)\n" ..
     "    local " .. v_v .. " = {}\n" ..
     "    local function " .. v_d .. "(_V)\n" ..
     "        if type(_V) ~= \"string\" then return _V end\n" ..
-    "        local _R = {}; for _i=1, #_V do table.insert(_R, string.char(_V:byte(_i) ~ " .. v_sx .. ")) end\n" ..
-    "        local _RS = table.concat(_R)\n" ..
-    "        local _T = _RS:sub(1,1); local _VAL = _RS:sub(2)\n" ..
+    "        local _R = \"\"; for _i=1, #_V do _R = _R .. " .. v_girt .. "[" .. es(gg("string.char")) .. "](_V:byte(_i) ~ " .. v_sx .. ") end\n" ..
+    "        local _T = _R:sub(1,1); local _VAL = _R:sub(2)\n" ..
     "        if _T == \"s\" then return _VAL\n" ..
-    "        elseif _T == \"n\" then return tonumber(_VAL)\n" ..
+    "        elseif _T == \"n\" then return " .. v_girt .. "[" .. es(gg("tonumber")) .. "](_VAL)\n" ..
     "        elseif _T == \"b\" then return _VAL == \"t\"\n" ..
     "        elseif _T == \"x\" then return nil\n" ..
     "        end\n" ..
-    "        return nil\n" ..
+    "        return _VAL\n" ..
     "    end\n" ..
     "    for _, _n in ipairs(" .. v_l .. ") do " .. v_v .. "[" .. v_d .. "(_n)] = " .. v_nil .. " end\n" ..
     "    while (function() local _o = " .. (math.random(1, 100)) .. "; return _o == _o end)() and (" .. v_st .. " ~ 0) ~= 0 do\n" ..
@@ -674,7 +725,7 @@ function Obfuscator.obfuscate(source, options)
     if options.fake ~= false then Obfuscator.injectFakeBranches(ast) end
     ast = Obfuscator.flattenControlFlow(ast)
     if options.mba ~= false then ast = Obfuscator.applyMBA(ast) end
-    local gm = Obfuscator.obfuscateIdentifiers(ast); local main, xk, om, egm, sx = Virtualizer.virtualize(ast, gm)
-    return Wrapper.generate(main, xk, om, egm, sx, options.integrity ~= false)
+    local gm = Obfuscator.obfuscateIdentifiers(ast); local main, xk, om, egm, sx, pp = Virtualizer.virtualize(ast, gm)
+    return Wrapper.generate(main, xk, om, egm, sx, options.integrity ~= false, pp)
 end
 return Obfuscator
