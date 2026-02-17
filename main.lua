@@ -37,26 +37,29 @@ layout = {
     background="#F5F5F5",
     create_card{
       { TextView, text="File Configuration", textSize="18sp", textColor="#212121", textStyle="bold" },
-      { TextView, text="Input Path (File or Directory):", layout_marginTop="8dp" },
-      { EditText, id="in_path", hint="/sdcard/Documents/myscript.lua", text="/sdcard/Documents/input.lua" },
+      { TextView, text="Input Path (File):", layout_marginTop="8dp" },
+      { EditText, id="in_path", hint="/sdcard/input.lua", text="/sdcard/Documents/input.lua" },
       { TextView, text="Output Path:", layout_marginTop="8dp" },
-      { EditText, id="out_path", hint="/sdcard/Documents/output.lua", text="/sdcard/Documents/output.lua" },
+      { EditText, id="out_path", hint="/sdcard/output.lua", text="/sdcard/Documents/output.lua" },
     },
     create_card{
       { TextView, text="Obfuscation Options", textSize="18sp", textColor="#212121", textStyle="bold" },
       {
         LinearLayout,
-        orientation="horizontal",
+        orientation="vertical",
         layout_marginTop="8dp",
-        { CheckBox, id="mba_check", text="MBA Transformations", checked=true },
-        { CheckBox, id="integrity_check", text="Integrity Check", checked=true, layout_marginLeft="16dp" },
+        { CheckBox, id="mba_check", text="MBA Transformations (Arithmetic Obfuscation)", checked=true },
+        { CheckBox, id="integrity_check", text="Integrity Check (Anti-Tamper Sum)", checked=true },
+        { CheckBox, id="fake_check", text="Fake Branch Injection (Anti-Analysis)", checked=true },
+        { CheckBox, id="commercial_check", text="Commercial Grade VM (Virtualization & Fusion)", checked=true },
       },
     },
     {
       Button,
-      text="Start Obfuscation",
+      text="START OBFUSCATION",
       layout_gravity="center",
       layout_margin="16dp",
+      layout_width="fill",
       backgroundColor="#2196F3",
       textColor="#FFFFFF",
       onClick=function()
@@ -65,55 +68,46 @@ layout = {
         local options = {
           mba = mba_check.isChecked(),
           integrity = integrity_check.isChecked(),
+          fake = fake_check.isChecked(),
+          commercial = commercial_check.isChecked(),
         }
+
+        log_text.setText("Starting...")
 
         task(function(in_p, out_p, options)
           local Obfuscator = require("obfuscator_engine")
-          local function process(ip, op)
-            local f = io.open(ip, "r")
-            if not f then error("Cannot open input file: " .. ip) end
-            local src = f:read("*all")
-            f:close()
-
-            local ok, res = pcall(Obfuscator.obfuscate, src, options)
-            if not ok then error("Obfuscation error: " .. tostring(res)) end
-
-            local f = io.open(op, "w")
-            if not f then error("Cannot open output file: " .. op) end
-            f:write(res)
-            f:close()
-          end
-
-          -- Check if directory
           local f = io.open(in_p, "r")
-          local is_dir = false
-          if f then
-            local _, err = f:read(0)
-            if err == "Is a directory" then is_dir = true end
-            f:close()
-          end
+          if not f then return false, "Cannot open input file" end
+          local src = f:read("*all")
+          f:close()
 
-          if is_dir then
-            -- Note: Simple directory traversal for demo,
-            -- real implementation would use Luajava to list files
-            return false, "Directory processing not fully implemented in demo"
-          else
-            local ok, err = pcall(process, in_p, out_p)
-            return ok, err
-          end
+          local ok, res = pcall(Obfuscator.obfuscate, src, options)
+          if not ok then return false, "Obfuscation error: " .. tostring(res) end
+
+          local f = io.open(out_p, "w")
+          if not f then return false, "Cannot open output file" end
+          f:write(res)
+          f:close()
+          return true, out_p
         end, in_p, out_p, options, function(ok, res)
           if ok then
-            print("Successfully obfuscated to " .. out_p)
-            log_text.append("\n[SUCCESS] " .. out_p)
+            print("Done!")
+            log_text.append("\n[SUCCESS] Saved to " .. tostring(res))
+            Toast.makeText(activity, "Obfuscation Complete!", Toast.LENGTH_SHORT).show()
           else
-            print("Error: " .. tostring(res))
+            print("Failed")
             log_text.append("\n[ERROR] " .. tostring(res))
+            AlertDialog.Builder(activity)
+            .setTitle("Error")
+            .setMessage(tostring(res))
+            .setPositiveButton("OK", nil)
+            .show()
           end
         end)
       end
     },
     create_card{
-      { TextView, text="Log", textSize="18sp", textColor="#212121", textStyle="bold" },
+      { TextView, text="Execution Log", textSize="18sp", textColor="#212121", textStyle="bold" },
       {
         EditText,
         id="log_text",
@@ -121,9 +115,10 @@ layout = {
         layout_height="200dp",
         gravity="top",
         editable=false,
-        text="Ready.",
+        text="System Ready.\nAdvanced Lua 5.3.3 Obfuscator Engine Active.",
         background="#EEEEEE",
         textSize="12sp",
+        textColor="#444444",
       },
     }
   }

@@ -1,4 +1,4 @@
-math.randomseed(os.time())
+math.randomseed(math.floor(os.time() + os.clock()))
 local Lexer = {}
 function Lexer.new(source) return setmetatable({ source = source, pos = 1, tokens = {}, line = 1 }, { __index = Lexer }) end
 function Lexer:peek(n) n = n or 0; return self.source:sub(self.pos + n, self.pos + n) end
@@ -95,7 +95,9 @@ function Parser:expect(v) local t = self:consume(); if not t or (t.value ~= v an
 function Parser:parse() return self:parseBlock() end
 function Parser:parseBlock()
     local body = {}
-    while self:peek().type ~= "eof" and not ({ ["end"]=1, ["else"]=1, ["elseif"]=1, ["until"]=1 })[self:peek().value] do table.insert(body, self:parseStatement()) end
+    while self:peek().type ~= "eof" and not ({ ["end"]=1, ["else"]=1, ["elseif"]=1, ["until"]=1 })[self:peek().value] do
+        if self:peek().value == ";" then self:consume() else table.insert(body, self:parseStatement()) end
+    end
     return { type = "Block", body = body }
 end
 function Parser:parseStatement()
@@ -488,7 +490,9 @@ function Virtualizer.virtualize(ast, gm)
         for _, op in ipairs(ops_list) do get_id(op) end
         while current_id < 150 do id_to_op[current_id] = "NOP"; current_id = current_id + 1 end
         local b = {}; for _, v in ipairs(p.b) do
-            local op_id = get_id(v.op); table.insert(b, op_id ~ (XK % 256)); table.insert(b, (v.arg or 0) ~ XK)
+            local op_id = get_id(v.op)
+            local packed = (op_id ~ (XK % 256)) + ((v.arg or 0) ~ XK) * 256
+            table.insert(b, packed)
         end
         local ks = { n = p.k.n }; for i = 1, p.k.n do local v = p.k[i]
             if type(v) == "table" and v.b then ks[i] = sp(v) else ks[i] = encrypt_k(v, SX) end
@@ -500,7 +504,7 @@ local Wrapper = {}
 function Wrapper.generate(main, xk, om, gm, sx, integrity)
     local function es(s)
         if type(s) ~= "string" then return tostring(s) end
-        local res = {}; for i=1, #s do table.insert(res, "\\" .. s:byte(i)) end
+        local res = {}; for i=1, #s do table.insert(res, string.format("\\%03d", s:byte(i))) end
         return "\"" .. table.concat(res) .. "\""
     end
     local function sk(ks) local s = "{"; for i=1, (ks.n or #ks) do local v = ks[i]
@@ -511,7 +515,8 @@ function Wrapper.generate(main, xk, om, gm, sx, integrity)
     local function sm(m) local s = "{"; for k, v in pairs(m) do s = s .. "[" .. k .. "]=" .. es(v) .. "," end; return s .. "}" end
     function Wrapper._sp(p)
         local h = 0; for i=1, #p.b do h = (h + p.b[i]) % 0xFFFFFFFF end
-        return "{b={" .. table.concat(p.b, ",") .. "},k=" .. sk(p.k) .. ",l=" .. sk(p.l) .. ",m=" .. sm(p.m) .. ",h=" .. h .. "}"
+        local r_off = math.random(1, 100)
+        return "{b={" .. table.concat(p.b, ",") .. "},k=" .. sk(p.k) .. ",l=" .. sk(p.l) .. ",m=" .. sm(p.m) .. ",h=" .. h .. ",r=" .. r_off .. "}"
     end
     local gms = "{"; for k, v in pairs(gm) do gms = gms .. "[" .. es(k) .. "]=" .. es(v) .. "," end; gms = gms .. "}"
 
@@ -526,13 +531,13 @@ function Wrapper.generate(main, xk, om, gm, sx, integrity)
         NEWTABLE = "_SS = _SS + 1; _S[_SS] = {}; _VM_ST = _DIS",
         CALL = "local _AS = {n=0}; for _i = 1, _AR do local _V = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; if type(_V) == 'table' and _V._M then for _j = _V.n, 1, -1 do table.insert(_AS, 1, _V[_j]); _AS.n = _AS.n + 1 end else table.insert(_AS, 1, _V); _AS.n = _AS.n + 1 end end; local _F = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _RE = table.pack(_F(table.unpack(_AS, 1, _AS.n))); _SS = _SS + 1; _S[_SS] = _RE[1]; _VM_ST = _DIS",
         CALL_M = "local _AS = {n=0}; for _i = 1, _AR do local _V = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; if type(_V) == 'table' and _V._M then for _j = _V.n, 1, -1 do table.insert(_AS, 1, _V[_j]); _AS.n = _AS.n + 1 end else table.insert(_AS, 1, _V); _AS.n = _AS.n + 1 end end; local _F = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _RE = table.pack(_F(table.unpack(_AS, 1, _AS.n))); _RE._M = true; _SS = _SS + 1; _S[_SS] = _RE; _VM_ST = _DIS",
-        RET = "local _RE = {}; for _i=1, _AR do _RE[_AR-_i+1] = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1 end; return table.unpack(_RE, 1, _AR)",
+        RET = "local _RE = {}; for _i=1, _AR do _RE[_AR-_i+1] = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1 end; _SS = _PR.r or 0; return table.unpack(_RE, 1, _AR)",
         RET_M = "local _RE = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; return table.unpack(_RE, 1, _RE.n)",
         VARARG = "local _PK = {}; for _i=_AR, _VA.n do table.insert(_PK, _VA[_i]) end; _SS = _SS + 1; _S[_SS] = _PK[1]; _VM_ST = _DIS",
         VARARG_M = "local _PK = {n=0}; for _i=_AR, _VA.n do _PK.n = _PK.n + 1; _PK[_PK.n] = _VA[_i] end; _PK._M = true; _SS = _SS + 1; _S[_SS] = _PK; _VM_ST = _DIS",
-        JMP = "_P = (_AR - 1) * 2 + 1; _VM_ST = _DIS",
-        JMP_IF_FALSE = "local _V = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; if not _V then _P = (_AR - 1) * 2 + 1 end; _VM_ST = _DIS",
-        JMP_IF_TRUE = "local _V = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; if _V then _P = (_AR - 1) * 2 + 1 end; _VM_ST = _DIS",
+        JMP = "_P = (_AR * 2) / 2; _VM_ST = _DIS",
+        JMP_IF_FALSE = "local _V = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; if not _V then _P = _AR else _P = _P end; _VM_ST = _DIS",
+        JMP_IF_TRUE = "local _V = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; if _V then _P = _AR else _P = _P end; _VM_ST = _DIS",
         ADD = "local _R = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _L = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = _L + _R; _VM_ST = _DIS",
         SUB = "local _R = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _L = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = _L - _R; _VM_ST = _DIS",
         MUL = "local _R = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _L = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = _L * _R; _VM_ST = _DIS",
@@ -588,56 +593,56 @@ function Wrapper.generate(main, xk, om, gm, sx, integrity)
 
     local vm_flattened = {}
     table.insert(vm_flattened, string.format("elseif _VM_ST == %d then", dis_id))
-    table.insert(vm_flattened, "if _P > #_B then _VM_ST = 0 else")
-    table.insert(vm_flattened, "local _OPI = _B[_P] ~ (_X % 256); _AR = _B[_P+1] ~ _X; _P = _P + 2; local _OPN = _M[_OPI]")
+    table.insert(vm_flattened, "if _P > #_B or (os.clock() - _CLK > 5.0) then _VM_ST = 0 else")
+    table.insert(vm_flattened, "local _PCK = _B[_P]; _P = _P + 1; local _OPI = (_PCK % 256) ~ (_X % 256); _AR = math.floor(_PCK / 256) ~ _X; local _OPN = _M[_OPI]")
     table.insert(vm_flattened, "if " .. table.concat(dispatcher_cases, " elseif ") .. " else _VM_ST = 0 end end")
 
     for sid, code in pairs(states) do
         table.insert(vm_flattened, string.format("elseif _VM_ST == %d then %s", sid, code))
     end
 
-    return string.format([[
-local _ENV_MAP = %s
-local _X = %d; local _SX = %d
-local _ENV = _G or _ENV
-local _NIL = {}
-local function _EXEC(_PR, _UP, ...)
-    if %s then
-        local _H = 0; for _i=1, #_PR.b do _H = (_H + _PR.b[_i]) %% 0xFFFFFFFF end
-        if _H ~= _PR.h then error("Integrity Check Failed") end
-    end
-    local _S, _SS, _P, _VM_ST, _AR = {}, 0, 1, %d, 0
-    local _B, _K, _L, _M = _PR.b, _PR.k, _PR.l, _PR.m; local _VA = table.pack(...)
-    local _V = {}
-    local function _D(_V)
-        if type(_V) ~= "string" then return _V end
-        local _R = {}; for _i=1, #_V do table.insert(_R, string.char(_V:byte(_i) ~ _SX)) end
-        local _RS = table.concat(_R)
-        local _T = _RS:sub(1,1); local _VAL = _RS:sub(2)
-        if _T == "s" then return _VAL
-        elseif _T == "n" then return tonumber(_VAL)
-        elseif _T == "b" then return _VAL == "t"
-        elseif _T == "x" then return nil
-        end
-        return nil
-    end
-    for _, _n in ipairs(_L) do _V[_D(_n)] = _NIL end
-    while _VM_ST ~= 0 do
-        if false then
-        %s
-        else _VM_ST = 0 end
-    end
-end
-return _EXEC(%s, nil, ...)]], gms, xk, sx, integrity and "true" or "false", dis_id, table.concat(vm_flattened, "\n"), Wrapper._sp(main))
+    local body = "local _ENV_MAP = " .. gms .. "\n" ..
+    "local _X = " .. tostring(xk) .. "; local _SX = " .. tostring(sx) .. "\n" ..
+    "local _ENV = _G or _ENV\nlocal _NIL = {}\n" ..
+    "local function _EXEC(_PR, _UP, ...)\n" ..
+    "    local _CLK = os.clock(); if debug and debug.gethook() then error(\"\\065\\110\\116\\105\\045\\068\\101\\098\\117\\103\\032\\065\\099\\116\\105\\118\\101\") end\n" ..
+    "    if " .. (integrity and "true" or "false") .. " then\n" ..
+    "        local _H = 0; for _i=1, #_PR.b do _H = (_H + _PR.b[_i]) % 4294967295 end\n" ..
+    "        if _H ~= _PR.h then error(\"\\073\\110\\116\\101\\103\\114\\105\\116\\121\\032\\067\\104\\101\\099\\107\\032\\070\\097\\105\\108\\101\\100\") end\n" ..
+    "    end\n" ..
+    "    local _S, _SS, _P, _VM_ST, _AR = {}, _PR.r or 0, 1, " .. tostring(dis_id) .. ", 0\n" ..
+    "    local _B, _K, _L, _M = _PR.b, _PR.k, _PR.l, _PR.m; local _VA = table.pack(...)\n" ..
+    "    local _V = {}\n" ..
+    "    local function _D(_V)\n" ..
+    "        if type(_V) ~= \"string\" then return _V end\n" ..
+    "        local _R = {}; for _i=1, #_V do table.insert(_R, string.char(_V:byte(_i) ~ _SX)) end\n" ..
+    "        local _RS = table.concat(_R)\n" ..
+    "        local _T = _RS:sub(1,1); local _VAL = _RS:sub(2)\n" ..
+    "        if _T == \"s\" then return _VAL\n" ..
+    "        elseif _T == \"n\" then return tonumber(_VAL)\n" ..
+    "        elseif _T == \"b\" then return _VAL == \"t\"\n" ..
+    "        elseif _T == \"x\" then return nil\n" ..
+    "        end\n" ..
+    "        return nil\n" ..
+    "    end\n" ..
+    "    for _, _n in ipairs(_L) do _V[_D(_n)] = _NIL end\n" ..
+    "    while _VM_ST ~= 0 do\n" ..
+    "        if false then\n" ..
+    table.concat(vm_flattened, "\n") ..
+    "\n        else _VM_ST = 0 end\n" ..
+    "    end\n" ..
+    "end\n" ..
+    "return _EXEC(" .. Wrapper._sp(main) .. ", nil, ...)"
+    return body
 end
 function Obfuscator.obfuscate(source, options)
-    options = options or { mba = true, integrity = true }
+    options = options or { mba = true, integrity = true, fake = true, commercial = true }
     local lex = Lexer.new(source); local tokens = lex:tokenize(); local par = Parser.new(tokens); local ast = par:parse()
     ast = Obfuscator.desugar(ast)
-    Obfuscator.injectFakeBranches(ast)
+    if options.fake ~= false then Obfuscator.injectFakeBranches(ast) end
     ast = Obfuscator.flattenControlFlow(ast)
-    if options.mba then ast = Obfuscator.applyMBA(ast) end
+    if options.mba ~= false then ast = Obfuscator.applyMBA(ast) end
     local gm = Obfuscator.obfuscateIdentifiers(ast); local main, xk, om, egm, sx = Virtualizer.virtualize(ast, gm)
-    return Wrapper.generate(main, xk, om, egm, sx, options.integrity)
+    return Wrapper.generate(main, xk, om, egm, sx, options.integrity ~= false)
 end
 return Obfuscator
