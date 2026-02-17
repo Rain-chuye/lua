@@ -1,3 +1,4 @@
+math.randomseed(os.time())
 local Lexer = {}
 function Lexer.new(source) return setmetatable({ source = source, pos = 1, tokens = {}, line = 1 }, { __index = Lexer }) end
 function Lexer:peek() return self.source:sub(self.pos, self.pos) end
@@ -6,8 +7,8 @@ function Lexer:tokenize()
     while self.pos <= #self.source do
         local c = self:peek()
         if c:match("%s") then self:consume()
-        elseif c:match("[%a_]") then
-            local s = self.pos; while self:peek():match("[%w_]") do self:consume() end
+        elseif c:match("[%a_]") or c:byte() > 127 then
+            local s = self.pos; while self:peek():match("[%w_]") or (self:peek() ~= "" and self:peek():byte() > 127) do self:consume() end
             local v = self.source:sub(s, self.pos - 1)
             local keywords = { ["local"]=1, ["function"]=1, ["return"]=1, ["if"]=1, ["then"]=1, ["else"]=1, ["elseif"]=1, ["end"]=1, ["while"]=1, ["do"]=1, ["repeat"]=1, ["until"]=1, ["for"]=1, ["in"] = 1, ["break"]=1, ["nil"]=1, ["true"]=1, ["false"]=1, ["not"]=1, ["and"]=1, ["or"]=1, ["goto"]=1 }
             table.insert(self.tokens, { type = keywords[v] and "keyword" or "name", value = v, line = self.line })
@@ -302,13 +303,30 @@ function Obfuscator.obfuscateIdentifiers(ast)
 end
 local Virtualizer = {}
 function Virtualizer.virtualize(ast, gm)
-    local om = {}; local ops = { "LOADK", "GETVAR", "SETVAR", "GETTABLE", "SETTABLE", "SETTABLE_IMM", "SETTABLE_MULTI", "NEWTABLE", "CALL", "CALL_M", "RET", "RET_M", "VARARG", "VARARG_M", "JMP", "JMP_IF_FALSE", "JMP_IF_TRUE", "ADD", "SUB", "MUL", "DIV", "MOD", "EQ", "NE", "LT", "GT", "LE", "GE", "CONCAT", "NOT", "LEN", "UNM", "AND", "OR", "CLOSURE", "LOAD_VA", "PICK_RESULT", "POP", "DUP", "SWAP", "BREAK", "BOR", "BXOR", "BAND", "SHL", "SHR", "IDIV", "BNOT" }
-    for i, v in ipairs(ops) do om[v] = i end; local XK = math.random(1, 0xFFFFFF); local SX = math.random(1, 255)
+    local ops_list = { "LOADK", "GETVAR", "SETVAR", "GETTABLE", "SETTABLE", "SETTABLE_IMM", "SETTABLE_MULTI", "NEWTABLE", "CALL", "CALL_M", "RET", "RET_M", "VARARG", "VARARG_M", "JMP", "JMP_IF_FALSE", "JMP_IF_TRUE", "ADD", "SUB", "MUL", "DIV", "MOD", "EQ", "NE", "LT", "GT", "LE", "GE", "CONCAT", "NOT", "LEN", "UNM", "AND", "OR", "CLOSURE", "LOAD_VA", "PICK_RESULT", "POP", "DUP", "SWAP", "BREAK", "BOR", "BXOR", "BAND", "SHL", "SHR", "IDIV", "BNOT", "NOP" }
+    local XK = math.random(1, 0xFFFFFF); local SX = math.random(1, 255)
     local function xor_s(s, k) local r = {}; for i=1, #s do table.insert(r, string.char(s:byte(i) ~ k)) end; return table.concat(r) end
+    local function encrypt_k(v, k)
+        local s
+        if type(v) == "string" then s = "s" .. v
+        elseif type(v) == "number" then s = "n" .. tostring(v)
+        elseif type(v) == "boolean" then s = "b" .. (v and "t" or "f")
+        elseif v == nil then s = "x"
+        end
+        return xor_s(s, k)
+    end
     local function pp(block, args)
         local instructions = {}; local constants = { n = 0 }; local loop_exits = {}; local locals_map = {}
         local function addK(v) for i=1, constants.n do if constants[i] == v then return i end end; constants.n = constants.n + 1; constants[constants.n] = v; return constants.n end
-        local function emit(op, arg) table.insert(instructions, { op = op, arg = arg }); return #instructions end
+        local function emit(op, arg)
+            if math.random() > 0.8 then
+                local jtype = math.random(1, 3)
+                if jtype == 1 then table.insert(instructions, { op = "LOADK", arg = addK(math.random()) }); table.insert(instructions, { op = "POP", arg = 1 })
+                elseif jtype == 2 then table.insert(instructions, { op = "JMP", arg = #instructions + 2 })
+                elseif jtype == 3 then table.insert(instructions, { op = "NOP", arg = 0 }) end
+            end
+            table.insert(instructions, { op = op, arg = arg }); return #instructions
+        end
         if args then for i, arg in ipairs(args) do if arg ~= "..." then emit("LOAD_VA", i); emit("SETVAR", addK(arg)); locals_map[arg] = true end end end
         local function walk(n, multi, is_stmt)
             if not n then return end
@@ -316,9 +334,10 @@ function Virtualizer.virtualize(ast, gm)
             elseif n.type == "LocalAssign" or n.type == "Assign" then
                 local values, vars = n.values or {}, n.vars or {}
                 if n.type == "LocalAssign" then for _, v in ipairs(vars) do locals_map[v] = true end end
-                for i = 1, #values do if i == #values and i < #vars and (values[i].type == "Call" or values[i].type == "MemberCall" or values[i].type == "Vararg") then walk(values[i], true) else walk(values[i]) end end
-                if #values < #vars and not (values[#values] and (values[#values].type == "Call" or values[#values].type == "MemberCall" or values[#values].type == "Vararg")) then for i = #values + 1, #vars do emit("LOADK", addK(nil)) end end
-                for i = #vars, 1, -1 do local var = vars[i]; local is_multi = (i >= #values and values[#values] and (values[#values].type == "Call" or values[#values].type == "MemberCall" or values[#values].type == "Vararg"))
+                local use_multi = (#vars > #values) and (values[#values] and (values[#values].type == "Call" or values[#values].type == "MemberCall" or values[#values].type == "Vararg"))
+                for i = 1, #values do if i == #values and use_multi then walk(values[i], true) else walk(values[i]) end end
+                if #values < #vars and not use_multi then for i = #values + 1, #vars do emit("LOADK", addK(nil)) end end
+                for i = #vars, 1, -1 do local var = vars[i]; local is_multi = (i >= #values and use_multi)
                     if is_multi then emit("PICK_RESULT", i - #values + 1) end
                     if type(var) == "table" and var.type == "Index" then walk(var.table); walk(var.key); emit("SETTABLE", 0)
                     elseif type(var) == "table" and var.type == "Var" then emit("SETVAR", addK(var.name)) else emit("SETVAR", addK(var)) end
@@ -337,8 +356,8 @@ function Virtualizer.virtualize(ast, gm)
                     walk(n.left); walk(n.right); local ops_m = { ["+"]="ADD", ["-"]="SUB", ["*"]="MUL", ["/"]="DIV", ["%"]="MOD", ["=="]="EQ", ["~="]="NE", ["<"]="LT", [">"]="GT", ["<="]="LE", [">="]="GE", [".."]="CONCAT", ["|"]="BOR", ["~"]="BXOR", ["&"]="BAND", ["<<"]="SHL", [">>"]="SHR", ["//"]="IDIV" }; emit(ops_m[n.op], 0)
                 end
             elseif n.type == "UnaryOp" then walk(n.right); local ops_m = { ["not"]="NOT", ["#"]="LEN", ["-"]="UNM", ["~"]="BNOT" }; emit(ops_m[n.op], 0)
-            elseif n.type == "Call" then walk(n.func); for i, v in ipairs(n.args) do if i == #n.args and v.type == "Vararg" then walk(v, true) else walk(v) end end; if multi or (n.args[#n.args] and n.args[#n.args].type == "Vararg") then emit("CALL_M", #n.args) else emit("CALL", #n.args) end; if is_stmt then emit("POP", 1) end
-            elseif n.type == "MemberCall" then walk(n.table); emit("DUP", 0); emit("LOADK", addK(n.member)); emit("GETTABLE", 0); emit("SWAP", 0); for i, v in ipairs(n.args) do if i == #n.args and v.type == "Vararg" then walk(v, true) else walk(v) end end; if multi or (n.args[#n.args] and n.args[#n.args].type == "Vararg") then emit("CALL_M", #n.args + 1) else emit("CALL", #n.args + 1) end; if is_stmt then emit("POP", 1) end
+            elseif n.type == "Call" then walk(n.func); local use_multi = n.args[#n.args] and (n.args[#n.args].type == "Call" or n.args[#n.args].type == "MemberCall" or n.args[#n.args].type == "Vararg"); for i, v in ipairs(n.args) do if i == #n.args and use_multi then walk(v, true) else walk(v) end end; if multi then emit("CALL_M", #n.args) else emit("CALL", #n.args) end; if is_stmt then emit("POP", 1) end
+            elseif n.type == "MemberCall" then walk(n.table); emit("DUP", 0); emit("LOADK", addK(n.member)); emit("GETTABLE", 0); emit("SWAP", 0); local use_multi = n.args[#n.args] and (n.args[#n.args].type == "Call" or n.args[#n.args].type == "MemberCall" or n.args[#n.args].type == "Vararg"); for i, v in ipairs(n.args) do if i == #n.args and use_multi then walk(v, true) else walk(v) end end; if multi then emit("CALL_M", #n.args + 1) else emit("CALL", #n.args + 1) end; if is_stmt then emit("POP", 1) end
             elseif n.type == "Index" then walk(n.table); walk(n.key); emit("GETTABLE", 0)
             elseif n.type == "Table" then emit("NEWTABLE", 0)
                 for i, v in ipairs(n.fields) do if v.key then walk(v.key); walk(v.value); emit("SETTABLE_IMM", 0) else if i == #n.fields and (v.value.type == "Call" or v.value.type == "MemberCall" or v.value.type == "Vararg") then walk(v.value, true); emit("SETTABLE_MULTI", 0) else walk(v.value); emit("SETTABLE_IMM", i) end end end
@@ -356,12 +375,25 @@ function Virtualizer.virtualize(ast, gm)
         end; walk(block, false, true); if #instructions == 0 or instructions[#instructions].op ~= "RET" then emit("RET", 0) end; local locals_list = {}; for k in pairs(locals_map) do table.insert(locals_list, k) end; return { b = instructions, k = constants, l = locals_list }
     end
     local main_proto = pp(ast); local function sp(p)
-        local b = {}; for _, v in ipairs(p.b) do table.insert(b, (om[v.op] or 0) ~ (XK % 256)); table.insert(b, (v.arg or 0) ~ XK) end
-        local ks = { n = p.k.n }; for i = 1, p.k.n do local v = p.k[i]
-            if type(v) == "table" and v.b then ks[i] = sp(v) elseif type(v) == "string" then ks[i] = xor_s(v, SX) else ks[i] = v end
+        local op_map = {}; local id_to_op = {}; local current_id = 1
+        local function get_id(op)
+            if not op_map[op] then
+                op_map[op] = {}; for i=1, math.random(1, 2) do table.insert(op_map[op], current_id); id_to_op[current_id] = op; current_id = current_id + 1 end
+            end
+            return op_map[op][math.random(1, #op_map[op])]
         end
-        local ls = {}; for _, v in ipairs(p.l) do table.insert(ls, xor_s(v, SX)) end; return { b = b, k = ks, l = ls }
-    end; local egm = {}; for k, v in pairs(gm) do egm[k] = xor_s(v, SX) end; return sp(main_proto), XK, om, egm, SX
+        for _, op in ipairs(ops_list) do get_id(op) end
+        while current_id < 150 do id_to_op[current_id] = "NOP"; current_id = current_id + 1 end
+
+        local b = {}; for _, v in ipairs(p.b) do
+            local op_id = get_id(v.op)
+            table.insert(b, op_id ~ (XK % 256)); table.insert(b, (v.arg or 0) ~ XK)
+        end
+        local ks = { n = p.k.n }; for i = 1, p.k.n do local v = p.k[i]
+            if type(v) == "table" and v.b then ks[i] = sp(v) else ks[i] = encrypt_k(v, SX) end
+        end
+        local ls = {}; for _, v in ipairs(p.l) do table.insert(ls, encrypt_k(v, SX)) end; return { b = b, k = ks, l = ls, m = id_to_op }
+    end; local egm = {}; for k, v in pairs(gm) do egm[k] = encrypt_k(v, SX) end; return sp(main_proto), XK, ops_list, egm, SX
 end
 local Wrapper = {}
 function Wrapper.generate(main, xk, om, gm, sx)
@@ -370,87 +402,122 @@ function Wrapper.generate(main, xk, om, gm, sx)
         elseif type(v) == "boolean" or type(v) == "number" then s = s .. tostring(v) .. ","
         elseif type(v) == "table" and v.b then s = s .. Wrapper._sp(v) .. ","
         else s = s .. "nil," end end; return s .. "}" end
-    function Wrapper._sp(p) return "{b={" .. table.concat(p.b, ",") .. "},k=" .. sk(p.k) .. ",l=" .. sk(p.l) .. "}" end
+    local function sm(m) local s = "{"; for k, v in pairs(m) do s = s .. "[" .. k .. "]=" .. string.format("%q", v) .. "," end; return s .. "}" end
+    function Wrapper._sp(p) return "{b={" .. table.concat(p.b, ",") .. "},k=" .. sk(p.k) .. ",l=" .. sk(p.l) .. ",m=" .. sm(p.m) .. "}" end
     local gms = "{"; for k, v in pairs(gm) do gms = gms .. string.format("[%q]=%q,", k, v) .. "" end; gms = gms .. "}"
-    local ocs = {}
-    local cd = {
-        LOADK = "_SS = _SS + 1; _S[_SS] = _D(_K[_AR]); _ST = 1",
-        GETVAR = "local _N = _D(_K[_AR]); local _VAL = _V[_N]; if _VAL ~= nil then if _VAL == _NIL then _VAL = nil end elseif _ENV_MAP[_N] then _VAL = _ENV[_D(_ENV_MAP[_N])] elseif _UP then local _curr = _UP; while _curr do if _curr.v[_N] ~= nil then _VAL = _curr.v[_N]; if _VAL == _NIL then _VAL = nil end; break end; _curr = _curr.up end end; _SS = _SS + 1; _S[_SS] = _VAL; _ST = 1",
-        SETVAR = "local _N = _D(_K[_AR]); local _VAL = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; if _V[_N] ~= nil then _V[_N] = (_VAL == nil and _NIL or _VAL) elseif _ENV_MAP[_N] then _ENV[_D(_ENV_MAP[_N])] = _VAL else local _curr, _f = _UP, false; while _curr do if _curr.v[_N] ~= nil then _curr.v[_N] = (_VAL == nil and _NIL or _VAL); _f = true; break end; _curr = _curr.up end; if not _f then _V[_N] = (_VAL == nil and _NIL or _VAL) end end; _ST = 1",
-        GETTABLE = "local _K = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _T = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = _T[_K]; _ST = 1",
-        SETTABLE = "local _K = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _T = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _VAL = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _T[_K] = _VAL; _ST = 1",
-        SETTABLE_IMM = "local _VAL = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; if _AR == 0 then local _K = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _T = _S[_SS]; _T[_K] = _VAL else local _T = _S[_SS]; _T[_AR] = _VAL end; _ST = 1",
-        SETTABLE_MULTI = "local _VAL = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _T = _S[_SS]; if type(_VAL) == 'table' and _VAL._M then for _j = 1, _VAL.n do table.insert(_T, _VAL[_j]) end else table.insert(_T, _VAL) end; _ST = 1",
-        NEWTABLE = "_SS = _SS + 1; _S[_SS] = {}; _ST = 1",
-        CALL = "local _AS = {n=0}; for _i = 1, _AR do local _V = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; if type(_V) == 'table' and _V._M then for _j = _V.n, 1, -1 do table.insert(_AS, 1, _V[_j]); _AS.n = _AS.n + 1 end else table.insert(_AS, 1, _V); _AS.n = _AS.n + 1 end end; local _F = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _RE = table.pack(_F(table.unpack(_AS, 1, _AS.n))); _SS = _SS + 1; _S[_SS] = _RE[1]; _ST = 1",
-        CALL_M = "local _AS = {n=0}; for _i = 1, _AR do local _V = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; if type(_V) == 'table' and _V._M then for _j = _V.n, 1, -1 do table.insert(_AS, 1, _V[_j]); _AS.n = _AS.n + 1 end else table.insert(_AS, 1, _V); _AS.n = _AS.n + 1 end end; local _F = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _RE = table.pack(_F(table.unpack(_AS, 1, _AS.n))); _RE._M = true; _SS = _SS + 1; _S[_SS] = _RE; _ST = 1",
+
+    local op_codes = {
+        LOADK = "_SS = _SS + 1; _S[_SS] = _D(_K[_AR]); _VM_ST = _DIS",
+        GETVAR = "local _N = _D(_K[_AR]); local _VAL = _V[_N]; if _VAL ~= nil then if _VAL == _NIL then _VAL = nil end elseif _ENV_MAP[_N] then _VAL = _ENV[_D(_ENV_MAP[_N])] elseif _UP then local _curr = _UP; while _curr do if _curr.v[_N] ~= nil then _VAL = _curr.v[_N]; if _VAL == _NIL then _VAL = nil end; break end; _curr = _curr.up end end; _SS = _SS + 1; _S[_SS] = _VAL; _VM_ST = _DIS",
+        SETVAR = "local _N = _D(_K[_AR]); local _VAL = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; if _V[_N] ~= nil then _V[_N] = (_VAL == nil and _NIL or _VAL) elseif _ENV_MAP[_N] then _ENV[_D(_ENV_MAP[_N])] = _VAL else local _curr, _f = _UP, false; while _curr do if _curr.v[_N] ~= nil then _curr.v[_N] = (_VAL == nil and _NIL or _VAL); _f = true; break end; _curr = _curr.up end; if not _f then _V[_N] = (_VAL == nil and _NIL or _VAL) end end; _VM_ST = _DIS",
+        GETTABLE = "local _K = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _T = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = _T[_K]; _VM_ST = _DIS",
+        SETTABLE = "local _K = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _T = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _VAL = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _T[_K] = _VAL; _VM_ST = _DIS",
+        SETTABLE_IMM = "local _VAL = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; if _AR == 0 then local _K = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _T = _S[_SS]; _T[_K] = _VAL else local _T = _S[_SS]; _T[_AR] = _VAL end; _VM_ST = _DIS",
+        SETTABLE_MULTI = "local _VAL = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _T = _S[_SS]; if type(_VAL) == 'table' and _VAL._M then for _j = 1, _VAL.n do table.insert(_T, _VAL[_j]) end else table.insert(_T, _VAL) end; _VM_ST = _DIS",
+        NEWTABLE = "_SS = _SS + 1; _S[_SS] = {}; _VM_ST = _DIS",
+        CALL = "local _AS = {n=0}; for _i = 1, _AR do local _V = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; if type(_V) == 'table' and _V._M then for _j = _V.n, 1, -1 do table.insert(_AS, 1, _V[_j]); _AS.n = _AS.n + 1 end else table.insert(_AS, 1, _V); _AS.n = _AS.n + 1 end end; local _F = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _RE = table.pack(_F(table.unpack(_AS, 1, _AS.n))); _SS = _SS + 1; _S[_SS] = _RE[1]; _VM_ST = _DIS",
+        CALL_M = "local _AS = {n=0}; for _i = 1, _AR do local _V = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; if type(_V) == 'table' and _V._M then for _j = _V.n, 1, -1 do table.insert(_AS, 1, _V[_j]); _AS.n = _AS.n + 1 end else table.insert(_AS, 1, _V); _AS.n = _AS.n + 1 end end; local _F = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _RE = table.pack(_F(table.unpack(_AS, 1, _AS.n))); _RE._M = true; _SS = _SS + 1; _S[_SS] = _RE; _VM_ST = _DIS",
         RET = "local _RE = {}; for _i=1, _AR do _RE[_AR-_i+1] = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1 end; return table.unpack(_RE, 1, _AR)",
         RET_M = "local _RE = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; return table.unpack(_RE, 1, _RE.n)",
-        VARARG = "local _PK = {}; for _i=_AR, _VA.n do table.insert(_PK, _VA[_i]) end; _SS = _SS + 1; _S[_SS] = _PK[1]; _ST = 1",
-        VARARG_M = "local _PK = {n=0}; for _i=_AR, _VA.n do _PK.n = _PK.n + 1; _PK[_PK.n] = _VA[_i] end; _PK._M = true; _SS = _SS + 1; _S[_SS] = _PK; _ST = 1",
-        JMP = "_P = (_AR - 1) * 2 + 1; _ST = 1",
-        JMP_IF_FALSE = "local _V = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; if not _V then _P = (_AR - 1) * 2 + 1 end; _ST = 1",
-        JMP_IF_TRUE = "local _V = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; if _V then _P = (_AR - 1) * 2 + 1 end; _ST = 1",
-        ADD = "local _R = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _L = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = _L + _R; _ST = 1",
-        SUB = "local _R = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _L = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = _L - _R; _ST = 1",
-        MUL = "local _R = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _L = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = _L * _R; _ST = 1",
-        DIV = "local _R = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _L = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = _L / _R; _ST = 1",
-        MOD = "local _R = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _L = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = _L % _R; _ST = 1",
-        EQ = "local _R = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _L = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = (_L == _R); _ST = 1",
-        NE = "local _R = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _L = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = (_L ~= _R); _ST = 1",
-        LT = "local _R = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _L = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = (_L < _R); _ST = 1",
-        GT = "local _R = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _L = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = (_L > _R); _ST = 1",
-        LE = "local _R = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _L = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = (_L <= _R); _ST = 1",
-        GE = "local _R = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _L = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = (_L >= _R); _ST = 1",
-        CONCAT = "local _R = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _L = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = _L .. _R; _ST = 1",
-        NOT = "_S[_SS] = not _S[_SS]; _ST = 1",
-        LEN = "_S[_SS] = #_S[_SS]; _ST = 1",
-        UNM = "_S[_SS] = -_S[_SS]; _ST = 1",
-        AND = "local _R = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _L = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = _L and _R; _ST = 1",
-        OR = "local _R = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _L = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = _L or _R; _ST = 1",
-        CLOSURE = "local _PR = _K[_AR]; _SS = _SS + 1; _S[_SS] = function(...) return _EXEC(_PR, {v=_V, up=_UP}, ...) end; _ST = 1",
-        LOAD_VA = "_SS = _SS + 1; _S[_SS] = _VA[_AR]; _ST = 1",
-        PICK_RESULT = "local _RES = _S[_SS]; _SS = _SS + 1; _S[_SS] = _RES[_AR]; _ST = 1",
-        POP = "for _i=1, _AR do _S[_SS] = nil; _SS = _SS - 1 end; _ST = 1",
-        DUP = "local _V = _S[_SS - _AR]; _SS = _SS + 1; _S[_SS] = _V; _ST = 1",
-        SWAP = "local _A = _S[_SS]; _S[_SS] = _S[_SS-1]; _S[_SS-1] = _A; _ST = 1",
-        BREAK = "_ST = 0",
-        BOR = "local _R = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _L = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = _L | _R; _ST = 1",
-        BXOR = "local _R = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _L = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = _L ~ _R; _ST = 1",
-        BAND = "local _R = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _L = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = _L & _R; _ST = 1",
-        SHL = "local _R = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _L = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = _L << _R; _ST = 1",
-        SHR = "local _R = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _L = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = _L >> _R; _ST = 1",
-        IDIV = "local _R = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _L = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = _L // _R; _ST = 1",
-        BNOT = "_S[_SS] = ~_S[_SS]; _ST = 1"
+        VARARG = "local _PK = {}; for _i=_AR, _VA.n do table.insert(_PK, _VA[_i]) end; _SS = _SS + 1; _S[_SS] = _PK[1]; _VM_ST = _DIS",
+        VARARG_M = "local _PK = {n=0}; for _i=_AR, _VA.n do _PK.n = _PK.n + 1; _PK[_PK.n] = _VA[_i] end; _PK._M = true; _SS = _SS + 1; _S[_SS] = _PK; _VM_ST = _DIS",
+        JMP = "_P = (_AR - 1) * 2 + 1; _VM_ST = _DIS",
+        JMP_IF_FALSE = "local _V = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; if not _V then _P = (_AR - 1) * 2 + 1 end; _VM_ST = _DIS",
+        JMP_IF_TRUE = "local _V = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; if _V then _P = (_AR - 1) * 2 + 1 end; _VM_ST = _DIS",
+        ADD = "local _R = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _L = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = _L + _R; _VM_ST = _DIS",
+        SUB = "local _R = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _L = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = _L - _R; _VM_ST = _DIS",
+        MUL = "local _R = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _L = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = _L * _R; _VM_ST = _DIS",
+        DIV = "local _R = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _L = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = _L / _R; _VM_ST = _DIS",
+        MOD = "local _R = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _L = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = _L % _R; _VM_ST = _DIS",
+        EQ = "local _R = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _L = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = (_L == _R); _VM_ST = _DIS",
+        NE = "local _R = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _L = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = (_L ~= _R); _VM_ST = _DIS",
+        LT = "local _R = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _L = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = (_L < _R); _VM_ST = _DIS",
+        GT = "local _R = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _L = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = (_L > _R); _VM_ST = _DIS",
+        LE = "local _R = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _L = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = (_L <= _R); _VM_ST = _DIS",
+        GE = "local _R = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _L = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = (_L >= _R); _VM_ST = _DIS",
+        CONCAT = "local _R = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _L = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = _L .. _R; _VM_ST = _DIS",
+        NOT = "_S[_SS] = not _S[_SS]; _VM_ST = _DIS",
+        LEN = "_S[_SS] = #_S[_SS]; _VM_ST = _DIS",
+        UNM = "_S[_SS] = -_S[_SS]; _VM_ST = _DIS",
+        AND = "local _R = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _L = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = _L and _R; _VM_ST = _DIS",
+        OR = "local _R = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _L = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = _L or _R; _VM_ST = _DIS",
+        CLOSURE = "local _PR = _K[_AR]; _SS = _SS + 1; _S[_SS] = function(...) return _EXEC(_PR, {v=_V, up=_UP}, ...) end; _VM_ST = _DIS",
+        LOAD_VA = "_SS = _SS + 1; _S[_SS] = _VA[_AR]; _VM_ST = _DIS",
+        PICK_RESULT = "local _RES = _S[_SS]; _SS = _SS + 1; _S[_SS] = _RES[_AR]; _VM_ST = _DIS",
+        POP = "for _i=1, _AR do _S[_SS] = nil; _SS = _SS - 1 end; _VM_ST = _DIS",
+        DUP = "local _V = _S[_SS - _AR]; _SS = _SS + 1; _S[_SS] = _V; _VM_ST = _DIS",
+        SWAP = "local _A = _S[_SS]; _S[_SS] = _S[_SS-1]; _S[_SS-1] = _A; _VM_ST = _DIS",
+        BREAK = "_VM_ST = 0",
+        BOR = "local _R = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _L = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = _L | _R; _VM_ST = _DIS",
+        BXOR = "local _R = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _L = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = _L ~ _R; _VM_ST = _DIS",
+        BAND = "local _R = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _L = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = _L & _R; _VM_ST = _DIS",
+        SHL = "local _R = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _L = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = _L << _R; _VM_ST = _DIS",
+        SHR = "local _R = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _L = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = _L >> _R; _VM_ST = _DIS",
+        IDIV = "local _R = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _L = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = _L // _R; _VM_ST = _DIS",
+        BNOT = "_S[_SS] = ~_S[_SS]; _VM_ST = _DIS",
+        NOP = "_VM_ST = _DIS"
     }
-    local ops_list = { "LOADK", "GETVAR", "SETVAR", "GETTABLE", "SETTABLE", "SETTABLE_IMM", "SETTABLE_MULTI", "NEWTABLE", "CALL", "CALL_M", "RET", "RET_M", "VARARG", "VARARG_M", "JMP", "JMP_IF_FALSE", "JMP_IF_TRUE", "ADD", "SUB", "MUL", "DIV", "MOD", "EQ", "NE", "LT", "GT", "LE", "GE", "CONCAT", "NOT", "LEN", "UNM", "AND", "OR", "CLOSURE", "LOAD_VA", "PICK_RESULT", "POP", "DUP", "SWAP", "BREAK", "BOR", "BXOR", "BAND", "SHL", "SHR", "IDIV", "BNOT" }
-    local rev = {}; for i, v in ipairs(ops_list) do rev[i] = v end; for i = 1, #ops_list do table.insert(ocs, string.format(" elseif _ST == %d then %s", i + 1, cd[rev[i]] or "")) end
+
+    local states = {}
+    local dis_id = math.random(100, 1000)
+    local op_to_state = {}
+    local curr_state = 1
+    local all_ops = {}
+    for op, _ in pairs(op_codes) do table.insert(all_ops, op) end
+    table.sort(all_ops)
+
+    for _, op in ipairs(all_ops) do
+        local sid = math.random(1000, 10000)
+        while states[sid] do sid = sid + 1 end
+        states[sid] = op_codes[op]:gsub("_DIS", tostring(dis_id))
+        op_to_state[op] = sid
+    end
+
+    local dispatcher_cases = {}
+    for op, sid in pairs(op_to_state) do
+        table.insert(dispatcher_cases, string.format("_OPN == %q then _VM_ST = %d", op, sid))
+    end
+
+    local vm_flattened = {}
+    table.insert(vm_flattened, string.format("elseif _VM_ST == %d then", dis_id))
+    table.insert(vm_flattened, "if _P > #_B then _VM_ST = 0 else")
+    table.insert(vm_flattened, "local _OPI = _B[_P] ~ (_X % 256); _AR = _B[_P+1] ~ _X; _P = _P + 2; local _OPN = _M[_OPI]")
+    table.insert(vm_flattened, "if " .. table.concat(dispatcher_cases, " elseif ") .. " else _VM_ST = 0 end end")
+
+    for sid, code in pairs(states) do
+        table.insert(vm_flattened, string.format("elseif _VM_ST == %d then %s", sid, code))
+    end
+
     return string.format([[
 local _ENV_MAP = %s
 local _X = %d; local _SX = %d
 local _ENV = _G or _ENV
 local _NIL = {}
 local function _EXEC(_PR, _UP, ...)
-    local _S, _SS, _P, _ST, _OP, _AR = {}, 0, 1, 1, 0, 0
-    local _B, _K, _L = _PR.b, _PR.k, _PR.l; local _VA = table.pack(...)
+    local _S, _SS, _P, _VM_ST, _AR = {}, 0, 1, %d, 0
+    local _B, _K, _L, _M = _PR.b, _PR.k, _PR.l, _PR.m; local _VA = table.pack(...)
     local _V = {}
     local function _D(_V)
-        if type(_V) == "string" then
-            local _R = ""
-            for _i=1, #_V do _R = _R .. string.char(_V:byte(_i) ~ _SX) end
-            return _R
+        if type(_V) ~= "string" then return _V end
+        local _R = ""
+        for _i=1, #_V do _R = _R .. string.char(_V:byte(_i) ~ _SX) end
+        local _T = _R:sub(1,1)
+        local _VAL = _R:sub(2)
+        if _T == "s" then return _VAL
+        elseif _T == "n" then return tonumber(_VAL)
+        elseif _T == "b" then return _VAL == "t"
+        elseif _T == "x" then return nil
         end
-        return _V
+        return nil
     end
     for _, _n in ipairs(_L) do _V[_D(_n)] = _NIL end
-    while _ST ~= 0 do
-        if _ST == 1 then
-            if _P > #_B then _ST = 0 else _OP = _B[_P] ~ (_X %% 256); _AR = _B[_P+1] ~ _X; _P = _P + 2; _ST = _OP + 1 end
+    while _VM_ST ~= 0 do
+        if false then
         %s
-        else _ST = 0 end
+        else _VM_ST = 0 end
     end
 end
-return _EXEC(%s, nil, ...)]], gms, xk, sx, table.concat(ocs, "\n"), Wrapper._sp(main))
+return _EXEC(%s, nil, ...)]], gms, xk, sx, dis_id, table.concat(vm_flattened, "\n"), Wrapper._sp(main))
 end
 function Obfuscator.obfuscate(source)
     local lex = Lexer.new(source); local tokens = lex:tokenize(); local par = Parser.new(tokens); local ast = par:parse()
