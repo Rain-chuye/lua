@@ -384,6 +384,7 @@ function Obfuscator.obfuscateIdentifiers(ast)
     local function walk(n, s)
         if not n or type(n) ~= "table" then return end
         if n.type == "Block" then local ns = { parent = s, locals = {} }; for i, v in ipairs(n.body) do walk(v, ns) end
+        elseif n.type == "Label" then -- ignore
         elseif n.type == "LocalAssign" then
             if n.is_recursive then for i, v in ipairs(n.vars) do local nn = gnn(); s.locals[v] = nn; n.vars[i] = nn end; if n.values then for _, v in ipairs(n.values) do walk(v, s) end end
             else if n.values then for _, v in ipairs(n.values) do walk(v, s) end end; for i, v in ipairs(n.vars) do local nn = gnn(); s.locals[v] = nn; n.vars[i] = nn end end
@@ -500,8 +501,11 @@ function Virtualizer.virtualize(ast, gm)
         local ls = {}; for _, v in ipairs(p.l) do table.insert(ls, encrypt_k(v, SX)) end; return { b = b, k = ks, l = ls, m = id_to_op }
     end; local egm = {}; for k, v in pairs(gm) do egm[k] = encrypt_k(v, SX) end; return sp(main_proto), XK, ops_list, egm, SX
 end
+
 local Wrapper = {}
 function Wrapper.generate(main, xk, om, gm, sx, integrity)
+    local vmap = {}
+    local function gv(n) if not vmap[n] then vmap[n] = string.format("_0x%X", math.random(0x1000, 0xFFFF)) end; return vmap[n] end
     local function es(s)
         if type(s) ~= "string" then return tostring(s) end
         local res = {}; for i=1, #s do table.insert(res, string.format("\\%03d", s:byte(i))) end
@@ -515,65 +519,80 @@ function Wrapper.generate(main, xk, om, gm, sx, integrity)
     local function sm(m) local s = "{"; for k, v in pairs(m) do s = s .. "[" .. k .. "]=" .. es(v) .. "," end; return s .. "}" end
     function Wrapper._sp(p)
         local h = 0; for i=1, #p.b do h = (h + p.b[i]) % 0xFFFFFFFF end
-        local r_off = math.random(1, 100)
-        return "{b={" .. table.concat(p.b, ",") .. "},k=" .. sk(p.k) .. ",l=" .. sk(p.l) .. ",m=" .. sm(p.m) .. ",h=" .. h .. ",r=" .. r_off .. "}"
+        local r_off = math.random(1, 100); local seed = math.random(1, 1000000)
+        return "{b={" .. table.concat(p.b, ",") .. "},k=" .. sk(p.k) .. ",l=" .. sk(p.l) .. ",m=" .. sm(p.m) .. ",h=" .. h .. ",r=" .. r_off .. ",s=" .. seed .. "}"
     end
-    local gms = "{"; for k, v in pairs(gm) do gms = gms .. "[" .. es(k) .. "]=" .. es(v) .. "," end; gms = gms .. "}"
+
+    local function oc(v) local o = math.random(1, 1000); return "(" .. (v + o) .. " - " .. o .. ")" end
+    local function mba_add(a, b)
+        local r = math.random(1, 3)
+        if r == 1 then return "((" .. a .. " ~ " .. b .. ") + 2 * (" .. a .. " & " .. b .. "))"
+        elseif r == 2 then return "((" .. a .. " | " .. b .. ") + (" .. a .. " & " .. b .. "))"
+        else return "(" .. a .. " + " .. oc(tonumber(b) or 0) .. ")" end
+    end
+    local function mba_sub(a, b) return "((" .. a .. " ~ " .. b .. ") - 2 * ( ~" .. a .. " & " .. b .. "))" end
+    local function sa(idx) return vmap["_S"] .. "[" .. mba_add(idx, oc(0)) .. "]" end
+
+    local v_stack, v_ss, v_p, v_st, v_ar = gv("_S"), gv("_SS"), gv("_P"), gv("_VM_ST"), gv("_AR")
+    local v_pr, v_up, v_b, v_k, v_l, v_m, v_va, v_v = gv("_PR"), gv("_UP"), gv("_B"), gv("_K"), gv("_L"), gv("_M"), gv("_VA"), gv("_V")
+    local v_dis = gv("_DIS"); local v_clk = gv("_CLK"); local v_d = gv("_D")
+    local v_env_map, v_x, v_sx, v_env, v_nil = gv("_ENV_MAP"), gv("_X"), gv("_SX"), gv("_ENV"), gv("_NIL")
+    local v_exec = gv("_EXEC")
+    local dis_id = math.random(100, 1000)
 
     local op_codes = {
-        LOADK = "_SS = _SS + 1; _S[_SS] = _D(_K[_AR]); _VM_ST = _DIS",
-        GETVAR = "local _N = _D(_K[_AR]); local _VAL = _V[_N]; if _VAL ~= nil then if _VAL == _NIL then _VAL = nil end elseif _ENV_MAP[_N] then _VAL = _ENV[_D(_ENV_MAP[_N])] elseif _UP then local _curr = _UP; while _curr do if _curr.v[_N] ~= nil then _VAL = _curr.v[_N]; if _VAL == _NIL then _VAL = nil end; break end; _curr = _curr.up end end; _SS = _SS + 1; _S[_SS] = _VAL; _VM_ST = _DIS",
-        SETVAR = "local _N = _D(_K[_AR]); local _VAL = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; if _V[_N] ~= nil then _V[_N] = (_VAL == nil and _NIL or _VAL) elseif _ENV_MAP[_N] then _ENV[_D(_ENV_MAP[_N])] = _VAL else local _curr, _f = _UP, false; while _curr do if _curr.v[_N] ~= nil then _curr.v[_N] = (_VAL == nil and _NIL or _VAL); _f = true; break end; _curr = _curr.up end; if not _f then _V[_N] = (_VAL == nil and _NIL or _VAL) end end; _VM_ST = _DIS",
-        GETTABLE = "local _K = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _T = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = _T[_K]; _VM_ST = _DIS",
-        SETTABLE = "local _K = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _T = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _VAL = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _T[_K] = _VAL; _VM_ST = _DIS",
-        SETTABLE_IMM = "local _VAL = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; if _AR == 0 then local _K = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _T = _S[_SS]; _T[_K] = _VAL else local _T = _S[_SS]; _T[_AR] = _VAL end; _VM_ST = _DIS",
-        SETTABLE_MULTI = "local _VAL = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _T = _S[_SS]; if type(_VAL) == 'table' and _VAL._M then for _j = 1, _VAL.n do table.insert(_T, _VAL[_j]) end else table.insert(_T, _VAL) end; _VM_ST = _DIS",
-        NEWTABLE = "_SS = _SS + 1; _S[_SS] = {}; _VM_ST = _DIS",
-        CALL = "local _AS = {n=0}; for _i = 1, _AR do local _V = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; if type(_V) == 'table' and _V._M then for _j = _V.n, 1, -1 do table.insert(_AS, 1, _V[_j]); _AS.n = _AS.n + 1 end else table.insert(_AS, 1, _V); _AS.n = _AS.n + 1 end end; local _F = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _RE = table.pack(_F(table.unpack(_AS, 1, _AS.n))); _SS = _SS + 1; _S[_SS] = _RE[1]; _VM_ST = _DIS",
-        CALL_M = "local _AS = {n=0}; for _i = 1, _AR do local _V = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; if type(_V) == 'table' and _V._M then for _j = _V.n, 1, -1 do table.insert(_AS, 1, _V[_j]); _AS.n = _AS.n + 1 end else table.insert(_AS, 1, _V); _AS.n = _AS.n + 1 end end; local _F = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _RE = table.pack(_F(table.unpack(_AS, 1, _AS.n))); _RE._M = true; _SS = _SS + 1; _S[_SS] = _RE; _VM_ST = _DIS",
-        RET = "local _RE = {}; for _i=1, _AR do _RE[_AR-_i+1] = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1 end; _SS = _PR.r or 0; return table.unpack(_RE, 1, _AR)",
-        RET_M = "local _RE = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; return table.unpack(_RE, 1, _RE.n)",
-        VARARG = "local _PK = {}; for _i=_AR, _VA.n do table.insert(_PK, _VA[_i]) end; _SS = _SS + 1; _S[_SS] = _PK[1]; _VM_ST = _DIS",
-        VARARG_M = "local _PK = {n=0}; for _i=_AR, _VA.n do _PK.n = _PK.n + 1; _PK[_PK.n] = _VA[_i] end; _PK._M = true; _SS = _SS + 1; _S[_SS] = _PK; _VM_ST = _DIS",
-        JMP = "_P = (_AR * 2) / 2; _VM_ST = _DIS",
-        JMP_IF_FALSE = "local _V = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; if not _V then _P = _AR else _P = _P end; _VM_ST = _DIS",
-        JMP_IF_TRUE = "local _V = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; if _V then _P = _AR else _P = _P end; _VM_ST = _DIS",
-        ADD = "local _R = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _L = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = _L + _R; _VM_ST = _DIS",
-        SUB = "local _R = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _L = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = _L - _R; _VM_ST = _DIS",
-        MUL = "local _R = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _L = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = _L * _R; _VM_ST = _DIS",
-        DIV = "local _R = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _L = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = _L / _R; _VM_ST = _DIS",
-        MOD = "local _R = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _L = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = _L % _R; _VM_ST = _DIS",
-        EQ = "local _R = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _L = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = (_L == _R); _VM_ST = _DIS",
-        NE = "local _R = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _L = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = (_L ~= _R); _VM_ST = _DIS",
-        LT = "local _R = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _L = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = (_L < _R); _VM_ST = _DIS",
-        GT = "local _R = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _L = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = (_L > _R); _VM_ST = _DIS",
-        LE = "local _R = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _L = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = (_L <= _R); _VM_ST = _DIS",
-        GE = "local _R = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _L = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = (_L >= _R); _VM_ST = _DIS",
-        CONCAT = "local _R = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _L = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = _L .. _R; _VM_ST = _DIS",
-        NOT = "_S[_SS] = not _S[_SS]; _VM_ST = _DIS",
-        LEN = "_S[_SS] = #_S[_SS]; _VM_ST = _DIS",
-        UNM = "_S[_SS] = -_S[_SS]; _VM_ST = _DIS",
-        AND = "local _R = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _L = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = _L and _R; _VM_ST = _DIS",
-        OR = "local _R = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _L = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = _L or _R; _VM_ST = _DIS",
-        CLOSURE = "local _PR = _K[_AR]; _SS = _SS + 1; _S[_SS] = function(...) return _EXEC(_PR, {v=_V, up=_UP}, ...) end; _VM_ST = _DIS",
-        LOAD_VA = "_SS = _SS + 1; _S[_SS] = _VA[_AR]; _VM_ST = _DIS",
-        PICK_RESULT = "local _RES = _S[_SS]; _SS = _SS + 1; _S[_SS] = _RES[_AR]; _VM_ST = _DIS",
-        POP = "for _i=1, _AR do _S[_SS] = nil; _SS = _SS - 1 end; _VM_ST = _DIS",
-        DUP = "local _V = _S[_SS - _AR]; _SS = _SS + 1; _S[_SS] = _V; _VM_ST = _DIS",
-        SWAP = "local _A = _S[_SS]; _S[_SS] = _S[_SS-1]; _S[_SS-1] = _A; _VM_ST = _DIS",
-        BREAK = "_VM_ST = 0",
-        BOR = "local _R = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _L = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = _L | _R; _VM_ST = _DIS",
-        BXOR = "local _R = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _L = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = _L ~ _R; _VM_ST = _DIS",
-        BAND = "local _R = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _L = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = _L & _R; _VM_ST = _DIS",
-        SHL = "local _R = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _L = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = _L << _R; _VM_ST = _DIS",
-        SHR = "local _R = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _L = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = _L >> _R; _VM_ST = _DIS",
-        IDIV = "local _R = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; local _L = _S[_SS]; _S[_SS] = nil; _SS = _SS - 1; _SS = _SS + 1; _S[_SS] = _L // _R; _VM_ST = _DIS",
-        BNOT = "_S[_SS] = ~_S[_SS]; _VM_ST = _DIS",
-        NOP = "_VM_ST = _DIS"
+        LOADK = v_ss .. " = " .. mba_add(v_ss, "1") .. "; " .. sa(v_ss) .. " = " .. v_d .. "(" .. v_k .. "[" .. v_ar .. "]); " .. v_st .. " = " .. dis_id,
+        GETVAR = "local _N = " .. v_d .. "(" .. v_k .. "[" .. v_ar .. "]); local _VAL = " .. v_v .. "[_N]; if _VAL ~= nil then if _VAL == " .. v_nil .. " then _VAL = nil end elseif " .. v_env_map .. "[_N] then _VAL = " .. v_env .. "[" .. v_d .. "(" .. v_env_map .. "[_N])] elseif " .. v_up .. " then local _curr = " .. v_up .. "; while _curr do if _curr.v[_N] ~= nil then _VAL = _curr.v[_N]; if _VAL == " .. v_nil .. " then _VAL = nil end; break end; _curr = _curr.up end end; " .. v_ss .. " = " .. mba_add(v_ss, "1") .. "; " .. sa(v_ss) .. " = _VAL; " .. v_st .. " = " .. dis_id,
+        SETVAR = "local _N = " .. v_d .. "(" .. v_k .. "[" .. v_ar .. "]); local _VAL = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; if " .. v_v .. "[_N] ~= nil then " .. v_v .. "[_N] = (_VAL == nil and " .. v_nil .. " or _VAL) elseif " .. v_env_map .. "[_N] then " .. v_env .. "[" .. v_d .. "(" .. v_env_map .. "[_N])] = _VAL else local _curr, _f = " .. v_up .. ", false; while _curr do if _curr.v[_N] ~= nil then _curr.v[_N] = (_VAL == nil and " .. v_nil .. " or _VAL); _f = true; break end; _curr = _curr.up end if not _f then " .. v_v .. "[_N] = (_VAL == nil and " .. v_nil .. " or _VAL) end end; " .. v_st .. " = " .. dis_id,
+        GETTABLE = "local _K = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; local _T = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; " .. v_ss .. " = " .. mba_add(v_ss, "1") .. "; " .. sa(v_ss) .. " = _T[_K]; " .. v_st .. " = " .. dis_id,
+        SETTABLE = "local _K = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; local _T = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; local _VAL = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; _T[_K] = _VAL; " .. v_st .. " = " .. dis_id,
+        SETTABLE_IMM = "local _VAL = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; if " .. v_ar .. " == 0 then local _K = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; local _T = " .. sa(v_ss) .. "; _T[_K] = _VAL else local _T = " .. sa(v_ss) .. "; _T[" .. v_ar .. "] = _VAL end; " .. v_st .. " = " .. dis_id,
+        SETTABLE_MULTI = "local _VAL = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; local _T = " .. sa(v_ss) .. "; if type(_VAL) == 'table' and _VAL._M then for _j = 1, _VAL.n do table.insert(_T, _VAL[_j]) end else table.insert(_T, _VAL) end; " .. v_st .. " = " .. dis_id,
+        NEWTABLE = v_ss .. " = " .. mba_add(v_ss, "1") .. "; " .. sa(v_ss) .. " = {}; " .. v_st .. " = " .. dis_id,
+        CALL = "local _AS = {n=0}; for _i = 1, " .. v_ar .. " do local _V = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; if type(_V) == 'table' and _V._M then for _j = _V.n, 1, -1 do table.insert(_AS, 1, _V[_j]); _AS.n = " .. mba_add("_AS.n", "1") .. " end else table.insert(_AS, 1, _V); _AS.n = " .. mba_add("_AS.n", "1") .. " end end local _F = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; local _RE = table.pack(_F(table.unpack(_AS, 1, _AS.n))); " .. v_ss .. " = " .. mba_add(v_ss, "1") .. "; " .. sa(v_ss) .. " = _RE[1]; " .. v_st .. " = " .. dis_id,
+        CALL_M = "local _AS = {n=0}; for _i = 1, " .. v_ar .. " do local _V = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; if type(_V) == 'table' and _V._M then for _j = _V.n, 1, -1 do table.insert(_AS, 1, _V[_j]); _AS.n = " .. mba_add("_AS.n", "1") .. " end else table.insert(_AS, 1, _V); _AS.n = " .. mba_add("_AS.n", "1") .. " end end local _F = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; local _RE = table.pack(_F(table.unpack(_AS, 1, _AS.n))); _RE._M = true; " .. v_ss .. " = " .. mba_add(v_ss, "1") .. "; " .. sa(v_ss) .. " = _RE; " .. v_st .. " = " .. dis_id,
+        RET = "local _RE = {}; for _i=1, " .. v_ar .. " do _RE[" .. mba_sub(mba_add(v_ar, "_i"), "1") .. "] = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. " end " .. v_ss .. " = " .. v_pr .. ".r or 0; return table.unpack(_RE, 1, " .. v_ar .. ")",
+        RET_M = "local _RE = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; return table.unpack(_RE, 1, _RE.n)",
+        VARARG = "local _PK = {}; for _i=" .. v_ar .. ", " .. v_va .. ".n do table.insert(_PK, " .. v_va .. "[_i]) end; " .. v_ss .. " = " .. mba_add(v_ss, "1") .. "; " .. sa(v_ss) .. " = _PK[1]; " .. v_st .. " = " .. dis_id,
+        VARARG_M = "local _PK = {n=0}; for _i=" .. v_ar .. ", " .. v_va .. ".n do _PK.n = " .. mba_add("_PK.n", "1") .. "; _PK[_PK.n] = " .. v_va .. "[_i] end; _PK._M = true; " .. v_ss .. " = " .. mba_add(v_ss, "1") .. "; " .. sa(v_ss) .. " = _PK; " .. v_st .. " = " .. dis_id,
+        JMP = v_p .. " = " .. v_ar .. "; " .. v_st .. " = " .. dis_id,
+        JMP_IF_FALSE = "local _V = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; if not _V then " .. v_p .. " = " .. v_ar .. " end; " .. v_st .. " = " .. dis_id,
+        JMP_IF_TRUE = "local _V = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; if _V then " .. v_p .. " = " .. v_ar .. " end; " .. v_st .. " = " .. dis_id,
+        ADD = "local _R = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; local _L = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; " .. v_ss .. " = " .. mba_add(v_ss, "1") .. "; " .. sa(v_ss) .. " = _L + _R; " .. v_st .. " = " .. dis_id,
+        SUB = "local _R = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; local _L = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; " .. v_ss .. " = " .. mba_add(v_ss, "1") .. "; " .. sa(v_ss) .. " = _L - _R; " .. v_st .. " = " .. dis_id,
+        MUL = "local _R = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; local _L = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; " .. v_ss .. " = " .. mba_add(v_ss, "1") .. "; " .. sa(v_ss) .. " = _L * _R; " .. v_st .. " = " .. dis_id,
+        DIV = "local _R = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; local _L = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; " .. v_ss .. " = " .. mba_add(v_ss, "1") .. "; " .. sa(v_ss) .. " = _L / _R; " .. v_st .. " = " .. dis_id,
+        MOD = "local _R = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; local _L = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; " .. v_ss .. " = " .. mba_add(v_ss, "1") .. "; " .. sa(v_ss) .. " = _L % _R; " .. v_st .. " = " .. dis_id,
+        EQ = "local _R = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; local _L = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; " .. v_ss .. " = " .. mba_add(v_ss, "1") .. "; " .. sa(v_ss) .. " = (_L == _R); " .. v_st .. " = " .. dis_id,
+        NE = "local _R = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; local _L = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; " .. v_ss .. " = " .. mba_add(v_ss, "1") .. "; " .. sa(v_ss) .. " = (_L ~= _R); " .. v_st .. " = " .. dis_id,
+        LT = "local _R = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; local _L = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; " .. v_ss .. " = " .. mba_add(v_ss, "1") .. "; " .. sa(v_ss) .. " = _L < _R; " .. v_st .. " = " .. dis_id,
+        GT = "local _R = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; local _L = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; " .. v_ss .. " = " .. mba_add(v_ss, "1") .. "; " .. sa(v_ss) .. " = _L > _R; " .. v_st .. " = " .. dis_id,
+        LE = "local _R = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; local _L = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; " .. v_ss .. " = " .. mba_add(v_ss, "1") .. "; " .. sa(v_ss) .. " = _L <= _R; " .. v_st .. " = " .. dis_id,
+        GE = "local _R = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; local _L = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; " .. v_ss .. " = " .. mba_add(v_ss, "1") .. "; " .. sa(v_ss) .. " = _L >= _R; " .. v_st .. " = " .. dis_id,
+        CONCAT = "local _R = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; local _L = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; " .. v_ss .. " = " .. mba_add(v_ss, "1") .. "; " .. sa(v_ss) .. " = _L .. _R; " .. v_st .. " = " .. dis_id,
+        NOT = sa(v_ss) .. " = not " .. sa(v_ss) .. "; " .. v_st .. " = " .. dis_id,
+        LEN = sa(v_ss) .. " = #" .. sa(v_ss) .. "; " .. v_st .. " = " .. dis_id,
+        UNM = sa(v_ss) .. " = -" .. sa(v_ss) .. "; " .. v_st .. " = " .. dis_id,
+        AND = "local _R = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; local _L = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; " .. v_ss .. " = " .. mba_add(v_ss, "1") .. "; " .. sa(v_ss) .. " = _L and _R; " .. v_st .. " = " .. dis_id,
+        OR = "local _R = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; local _L = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; " .. v_ss .. " = " .. mba_add(v_ss, "1") .. "; " .. sa(v_ss) .. " = _L or _R; " .. v_st .. " = " .. dis_id,
+        CLOSURE = "local _PR = " .. v_k .. "[" .. v_ar .. "]; " .. v_ss .. " = " .. mba_add(v_ss, "1") .. "; " .. sa(v_ss) .. " = function(...) return " .. v_exec .. "(_PR, {v=" .. v_v .. ", up=" .. v_up .. "}, ...) end; " .. v_st .. " = " .. dis_id,
+        LOAD_VA = v_ss .. " = " .. mba_add(v_ss, "1") .. "; " .. sa(v_ss) .. " = " .. v_va .. "[" .. v_ar .. "]; " .. v_st .. " = " .. dis_id,
+        PICK_RESULT = "local _RES = " .. sa(v_ss) .. "; " .. v_ss .. " = " .. mba_add(v_ss, "1") .. "; " .. sa(v_ss) .. " = _RES[" .. v_ar .. "]; " .. v_st .. " = " .. dis_id,
+        POP = "for _i=1, " .. v_ar .. " do " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. " end " .. v_st .. " = " .. dis_id,
+        DUP = "local _V = " .. v_stack .. "[" .. v_ss .. " - " .. v_ar .. "]; " .. v_ss .. " = " .. mba_add(v_ss, "1") .. "; " .. sa(v_ss) .. " = _V; " .. v_st .. " = " .. dis_id,
+        SWAP = "local _A = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = " .. v_stack .. "[" .. v_ss .. "-1]; " .. v_stack .. "[" .. v_ss .. "-1] = _A; " .. v_st .. " = " .. dis_id,
+        BREAK = v_st .. " = 0",
+        BOR = "local _R = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; local _L = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; " .. v_ss .. " = " .. mba_add(v_ss, "1") .. "; " .. sa(v_ss) .. " = _L | _R; " .. v_st .. " = " .. dis_id,
+        BXOR = "local _R = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; local _L = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; " .. v_ss .. " = " .. mba_add(v_ss, "1") .. "; " .. sa(v_ss) .. " = _L ~ _R; " .. v_st .. " = " .. dis_id,
+        BAND = "local _R = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; local _L = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; " .. v_ss .. " = " .. mba_add(v_ss, "1") .. "; " .. sa(v_ss) .. " = _L & _R; " .. v_st .. " = " .. dis_id,
+        SHL = "local _R = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; local _L = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; " .. v_ss .. " = " .. mba_add(v_ss, "1") .. "; " .. sa(v_ss) .. " = _L << _R; " .. v_st .. " = " .. dis_id,
+        SHR = "local _R = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; local _L = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; " .. v_ss .. " = " .. mba_add(v_ss, "1") .. "; " .. sa(v_ss) .. " = _L >> _R; " .. v_st .. " = " .. dis_id,
+        IDIV = "local _R = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; local _L = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; " .. v_ss .. " = " .. mba_add(v_ss, "1") .. "; " .. sa(v_ss) .. " = _L // _R; " .. v_st .. " = " .. dis_id,
+        BNOT = sa(v_ss) .. " = ~" .. sa(v_ss) .. "; " .. v_st .. " = " .. dis_id,
+        NOP = v_st .. " = " .. dis_id
     }
 
     local states = {}
-    local dis_id = math.random(100, 1000)
     local op_to_state = {}
     local all_ops = {}
     for op, _ in pairs(op_codes) do table.insert(all_ops, op) end
@@ -582,40 +601,53 @@ function Wrapper.generate(main, xk, om, gm, sx, integrity)
     for _, op in ipairs(all_ops) do
         local sid = math.random(1000, 10000)
         while states[sid] do sid = sid + 1 end
-        states[sid] = op_codes[op]:gsub("_DIS", tostring(dis_id))
+        states[sid] = op_codes[op]
         op_to_state[op] = sid
+    end
+
+    -- Add trap states
+    for i=1, 20 do
+        local sid = math.random(10000, 20000)
+        while states[sid] do sid = sid + 1 end
+        states[sid] = v_st .. " = " .. math.random(1, 1000) .. "; if 1+1==3 then " .. v_p .. "=0 end"
     end
 
     local dispatcher_cases = {}
     for op, sid in pairs(op_to_state) do
-        table.insert(dispatcher_cases, string.format("_OPN == %s then _VM_ST = %d", es(op), sid))
+        table.insert(dispatcher_cases, string.format("_OPN == %s then " .. v_st .. " = %d", es(op), sid))
     end
 
     local vm_flattened = {}
-    table.insert(vm_flattened, string.format("elseif _VM_ST == %d then", dis_id))
-    table.insert(vm_flattened, "if _P > #_B or (os.clock() - _CLK > 5.0) then _VM_ST = 0 else")
-    table.insert(vm_flattened, "local _PCK = _B[_P]; _P = _P + 1; local _OPI = (_PCK % 256) ~ (_X % 256); _AR = math.floor(_PCK / 256) ~ _X; local _OPN = _M[_OPI]")
-    table.insert(vm_flattened, "if " .. table.concat(dispatcher_cases, " elseif ") .. " else _VM_ST = 0 end end")
+    table.insert(vm_flattened, string.format("elseif (" .. v_st .. " ~ %d) == 0 then", dis_id))
+    table.insert(vm_flattened, "if " .. v_p .. " > #" .. v_b .. " or (os.clock() - " .. v_clk .. " > 15.0) then " .. v_st .. " = 0 else")
+    table.insert(vm_flattened, "local _PCK = " .. v_b .. "[" .. v_p .. "]; " .. v_p .. " = " .. mba_add(v_p, "1") .. "; local _OPI = (_PCK % 256) ~ (" .. v_x .. " % 256); " .. v_ar .. " = math.floor(_PCK / 256) ~ " .. v_x .. "; local _OPN = " .. v_m .. "[_OPI]")
+    table.insert(vm_flattened, "if " .. table.concat(dispatcher_cases, " elseif ") .. " else " .. v_st .. " = 0 end end")
 
-    for sid, code in pairs(states) do
-        table.insert(vm_flattened, string.format("elseif _VM_ST == %d then %s", sid, code))
+    local state_ids = {}
+    for sid in pairs(states) do table.insert(state_ids, sid) end
+    for i = #state_ids, 2, -1 do local j = math.random(1, i); state_ids[i], state_ids[j] = state_ids[j], state_ids[i] end
+
+    for _, sid in ipairs(state_ids) do
+        table.insert(vm_flattened, string.format("elseif (" .. v_st .. " ~ %d) == 0 then %s", sid, states[sid]))
     end
 
-    local body = "local _ENV_MAP = " .. gms .. "\n" ..
-    "local _X = " .. tostring(xk) .. "; local _SX = " .. tostring(sx) .. "\n" ..
-    "local _ENV = _G or _ENV\nlocal _NIL = {}\n" ..
-    "local function _EXEC(_PR, _UP, ...)\n" ..
-    "    local _CLK = os.clock(); if debug and debug.gethook() then error(\"\\065\\110\\116\\105\\045\\068\\101\\098\\117\\103\\032\\065\\099\\116\\105\\118\\101\") end\n" ..
+    local gms = "{"; for k, v in pairs(gm) do gms = gms .. "[" .. es(k) .. "]=" .. es(v) .. "," end; gms = gms .. "}"
+    local body = "local " .. v_env_map .. " = " .. gms .. "\n" ..
+    "local " .. v_x .. " = " .. tostring(xk) .. "; local " .. v_sx .. " = " .. tostring(sx) .. "\n" ..
+    "local " .. v_env .. " = _G or _ENV\nlocal " .. v_nil .. " = {}\n" ..
+    "local function " .. v_exec .. "(" .. v_pr .. ", " .. v_up .. ", ...)\n" ..
+    "    local " .. v_clk .. " = os.clock(); math.randomseed(" .. v_pr .. ".s or os.time())\n" ..
+    "    if debug then if debug.gethook() or debug.getinfo(50, 'f') then error(\"\\065\\110\\116\\105\\045\\068\\101\\098\\117\\103\") end end\n" ..
     "    if " .. (integrity and "true" or "false") .. " then\n" ..
-    "        local _H = 0; for _i=1, #_PR.b do _H = (_H + _PR.b[_i]) % 4294967295 end\n" ..
-    "        if _H ~= _PR.h then error(\"\\073\\110\\116\\101\\103\\114\\105\\116\\121\\032\\067\\104\\101\\099\\107\\032\\070\\097\\105\\108\\101\\100\") end\n" ..
+    "        local _H = 0; for _i=1, #" .. v_pr .. ".b do _H = (_H + " .. v_pr .. ".b[_i]) % 4294967295 end\n" ..
+    "        if _H ~= " .. v_pr .. ".h then error(\"\\073\\110\\116\\101\\103\\114\\105\\116\\121\\032\\067\\104\\101\\099\\107\\032\\070\\097\\105\\108\\101\\100\") end\n" ..
     "    end\n" ..
-    "    local _S, _SS, _P, _VM_ST, _AR = {}, _PR.r or 0, 1, " .. tostring(dis_id) .. ", 0\n" ..
-    "    local _B, _K, _L, _M = _PR.b, _PR.k, _PR.l, _PR.m; local _VA = table.pack(...)\n" ..
-    "    local _V = {}\n" ..
-    "    local function _D(_V)\n" ..
+    "    local " .. v_stack .. ", " .. v_ss .. ", " .. v_p .. ", " .. v_st .. ", " .. v_ar .. " = {}, " .. v_pr .. ".r or 0, 1, " .. dis_id .. ", 0\n" ..
+    "    local " .. v_b .. ", " .. v_k .. ", " .. v_l .. ", " .. v_m .. " = " .. v_pr .. ".b, " .. v_pr .. ".k, " .. v_pr .. ".l, " .. v_pr .. ".m; local " .. v_va .. " = table.pack(...)\n" ..
+    "    local " .. v_v .. " = {}\n" ..
+    "    local function " .. v_d .. "(_V)\n" ..
     "        if type(_V) ~= \"string\" then return _V end\n" ..
-    "        local _R = {}; for _i=1, #_V do table.insert(_R, string.char(_V:byte(_i) ~ _SX)) end\n" ..
+    "        local _R = {}; for _i=1, #_V do table.insert(_R, string.char(_V:byte(_i) ~ " .. v_sx .. ")) end\n" ..
     "        local _RS = table.concat(_R)\n" ..
     "        local _T = _RS:sub(1,1); local _VAL = _RS:sub(2)\n" ..
     "        if _T == \"s\" then return _VAL\n" ..
@@ -625,14 +657,14 @@ function Wrapper.generate(main, xk, om, gm, sx, integrity)
     "        end\n" ..
     "        return nil\n" ..
     "    end\n" ..
-    "    for _, _n in ipairs(_L) do _V[_D(_n)] = _NIL end\n" ..
-    "    while _VM_ST ~= 0 do\n" ..
-    "        if false then\n" ..
+    "    for _, _n in ipairs(" .. v_l .. ") do " .. v_v .. "[" .. v_d .. "(_n)] = " .. v_nil .. " end\n" ..
+    "    while (function() local _o = " .. (math.random(1, 100)) .. "; return _o == _o end)() and (" .. v_st .. " ~ 0) ~= 0 do\n" ..
+    "        if 1 == 2 then\n" ..
     table.concat(vm_flattened, "\n") ..
-    "\n        else _VM_ST = 0 end\n" ..
+    "\n        else " .. v_st .. " = 0 end\n" ..
     "    end\n" ..
     "end\n" ..
-    "return _EXEC(" .. Wrapper._sp(main) .. ", nil, ...)"
+    "return " .. v_exec .. "(" .. Wrapper._sp(main) .. ", nil, ...)"
     return body
 end
 function Obfuscator.obfuscate(source, options)
