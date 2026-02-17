@@ -279,6 +279,55 @@ function Obfuscator.flattenControlFlow(ast)
         end; return n
     end; return walk(ast)
 end
+function Obfuscator.applyMBA(ast)
+    local function copy(n)
+        if type(n) ~= "table" then return n end
+        local r = {}; for k, v in pairs(n) do r[k] = type(v) == "table" and copy(v) or v end; return r
+    end
+    local function walk(n)
+        if not n or type(n) ~= "table" then return n end
+        if n.type == "Block" then for i, v in ipairs(n.body) do n.body[i] = walk(v) end
+        elseif n.type == "If" then n.cond = walk(n.cond); n.body = walk(n.body); for _, v in ipairs(n.elseifs) do v.cond = walk(v.cond); v.body = walk(v.body) end; n.elseBlock = walk(n.elseBlock)
+        elseif n.type == "While" then n.cond = walk(n.cond); n.body = walk(n.body)
+        elseif n.type == "FunctionDef" then n.body = walk(n.body)
+        elseif n.type == "Return" then for i, v in ipairs(n.values) do n.values[i] = walk(v) end
+        elseif n.type == "Assign" or n.type == "LocalAssign" then
+            if n.values then for i, v in ipairs(n.values) do n.values[i] = walk(v) end end
+            if n.vars then for i, v in ipairs(n.vars) do n.vars[i] = walk(v) end end
+        elseif n.type == "Call" or n.type == "MemberCall" then
+            if n.func then n.func = walk(n.func) end
+            if n.table then n.table = walk(n.table) end
+            for i, v in ipairs(n.args) do n.args[i] = walk(v) end
+        elseif n.type == "Table" then for _, f in ipairs(n.fields) do if f.key then f.key = walk(f.key) end; f.value = walk(f.value) end
+        elseif n.type == "Index" then n.table = walk(n.table); n.key = walk(n.key)
+        elseif n.type == "UnaryOp" then
+            n.right = walk(n.right)
+            if n.op == "~" and math.random() > 0.5 then
+                -- ~x = -x - 1
+                return { type = "BinaryOp", op = "-", left = { type = "UnaryOp", op = "-", right = copy(n.right) }, right = { type = "Number", value = "1" } }
+            end
+        elseif n.type == "BinaryOp" then
+            n.left = walk(n.left)
+            n.right = walk(n.right)
+            local function is_safe(node) return node.type == "Var" or node.type == "Number" or node.type == "Boolean" end
+            if is_safe(n.left) and is_safe(n.right) and math.random() > 0.4 then
+                if n.op == "+" then
+                    return { type = "BinaryOp", op = "+", left = { type = "BinaryOp", op = "~", left = copy(n.left), right = copy(n.right) }, right = { type = "BinaryOp", op = "*", left = { type = "Number", value = "2" }, right = { type = "BinaryOp", op = "&", left = copy(n.left), right = copy(n.right) } } }
+                elseif n.op == "-" then
+                    return { type = "BinaryOp", op = "-", left = { type = "BinaryOp", op = "~", left = copy(n.left), right = copy(n.right) }, right = { type = "BinaryOp", op = "*", left = { type = "Number", value = "2" }, right = { type = "BinaryOp", op = "&", left = { type = "UnaryOp", op = "~", right = copy(n.left) }, right = copy(n.right) } } }
+                elseif n.op == "~" then
+                    return { type = "BinaryOp", op = "-", left = { type = "BinaryOp", op = "|", left = copy(n.left), right = copy(n.right) }, right = { type = "BinaryOp", op = "&", left = copy(n.left), right = copy(n.right) } }
+                elseif n.op == "|" then
+                    return { type = "BinaryOp", op = "+", left = { type = "BinaryOp", op = "~", left = copy(n.left), right = copy(n.right) }, right = { type = "BinaryOp", op = "&", left = copy(n.left), right = copy(n.right) } }
+                elseif n.op == "&" then
+                    return { type = "BinaryOp", op = "-", left = { type = "BinaryOp", op = "+", left = copy(n.left), right = copy(n.right) }, right = { type = "BinaryOp", op = "|", left = copy(n.left), right = copy(n.right) } }
+                end
+            end
+        end
+        return n
+    end
+    return walk(ast)
+end
 function Obfuscator.obfuscateIdentifiers(ast)
     local gm = {}; local gr = {}; local c = 0; local function gnn() c = c + 1; return string.format("_0x%X", c + 0xABCDEF) end
     local function walk(n, s)
@@ -396,14 +445,17 @@ function Virtualizer.virtualize(ast, gm)
     end; local egm = {}; for k, v in pairs(gm) do egm[k] = encrypt_k(v, SX) end; return sp(main_proto), XK, ops_list, egm, SX
 end
 local Wrapper = {}
-function Wrapper.generate(main, xk, om, gm, sx)
+function Wrapper.generate(main, xk, om, gm, sx, integrity)
     local function sk(ks) local s = "{"; for i=1, (ks.n or #ks) do local v = ks[i]
         if type(v) == "string" then s = s .. string.format("%q", v) .. ","
         elseif type(v) == "boolean" or type(v) == "number" then s = s .. tostring(v) .. ","
         elseif type(v) == "table" and v.b then s = s .. Wrapper._sp(v) .. ","
         else s = s .. "nil," end end; return s .. "}" end
     local function sm(m) local s = "{"; for k, v in pairs(m) do s = s .. "[" .. k .. "]=" .. string.format("%q", v) .. "," end; return s .. "}" end
-    function Wrapper._sp(p) return "{b={" .. table.concat(p.b, ",") .. "},k=" .. sk(p.k) .. ",l=" .. sk(p.l) .. ",m=" .. sm(p.m) .. "}" end
+    function Wrapper._sp(p)
+        local h = 0; for i=1, #p.b do h = (h + p.b[i]) % 0xFFFFFFFF end
+        return "{b={" .. table.concat(p.b, ",") .. "},k=" .. sk(p.k) .. ",l=" .. sk(p.l) .. ",m=" .. sm(p.m) .. ",h=" .. h .. "}"
+    end
     local gms = "{"; for k, v in pairs(gm) do gms = gms .. string.format("[%q]=%q,", k, v) .. "" end; gms = gms .. "}"
 
     local op_codes = {
@@ -494,6 +546,10 @@ local _X = %d; local _SX = %d
 local _ENV = _G or _ENV
 local _NIL = {}
 local function _EXEC(_PR, _UP, ...)
+    if %s then
+        local _H = 0; for _i=1, #_PR.b do _H = (_H + _PR.b[_i]) %% 0xFFFFFFFF end
+        if _H ~= _PR.h then error("Integrity Check Failed") end
+    end
     local _S, _SS, _P, _VM_ST, _AR = {}, 0, 1, %d, 0
     local _B, _K, _L, _M = _PR.b, _PR.k, _PR.l, _PR.m; local _VA = table.pack(...)
     local _V = {}
@@ -517,14 +573,16 @@ local function _EXEC(_PR, _UP, ...)
         else _VM_ST = 0 end
     end
 end
-return _EXEC(%s, nil, ...)]], gms, xk, sx, dis_id, table.concat(vm_flattened, "\n"), Wrapper._sp(main))
+return _EXEC(%s, nil, ...)]], gms, xk, sx, integrity and "true" or "false", dis_id, table.concat(vm_flattened, "\n"), Wrapper._sp(main))
 end
-function Obfuscator.obfuscate(source)
+function Obfuscator.obfuscate(source, options)
+    options = options or { mba = true, integrity = true }
     local lex = Lexer.new(source); local tokens = lex:tokenize(); local par = Parser.new(tokens); local ast = par:parse()
     ast = Obfuscator.desugar(ast)
     Obfuscator.injectFakeBranches(ast)
     ast = Obfuscator.flattenControlFlow(ast)
+    if options.mba then ast = Obfuscator.applyMBA(ast) end
     local gm = Obfuscator.obfuscateIdentifiers(ast); local main, xk, om, egm, sx = Virtualizer.virtualize(ast, gm)
-    return Wrapper.generate(main, xk, om, egm, sx)
+    return Wrapper.generate(main, xk, om, egm, sx, options.integrity)
 end
 return Obfuscator
