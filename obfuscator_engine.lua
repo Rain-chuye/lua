@@ -1,7 +1,7 @@
 math.randomseed(os.time())
 local Lexer = {}
 function Lexer.new(source) return setmetatable({ source = source, pos = 1, tokens = {}, line = 1 }, { __index = Lexer }) end
-function Lexer:peek() return self.source:sub(self.pos, self.pos) end
+function Lexer:peek(n) n = n or 0; return self.source:sub(self.pos + n, self.pos + n) end
 function Lexer:consume() local c = self:peek(); self.pos = self.pos + 1; if c == "\n" then self.line = self.line + 1 end; return c end
 function Lexer:tokenize()
     while self.pos <= #self.source do
@@ -14,21 +14,63 @@ function Lexer:tokenize()
             table.insert(self.tokens, { type = keywords[v] and "keyword" or "name", value = v, line = self.line })
         elseif c:match("%d") then
             local s = self.pos
-            if c == "0" and self.source:sub(self.pos+1, self.pos+1):lower() == "x" then
+            if c == "0" and self:peek(1):lower() == "x" then
                 self:consume(); self:consume(); while self:peek():match("[%da-fA-F]") do self:consume() end
-            else while self:peek():match("[%d%.]") do self:consume() end end
+            else
+                while self:peek():match("[%d%.]") do self:consume() end
+                if self:peek():lower() == "e" then
+                    self:consume()
+                    if self:peek() == "+" or self:peek() == "-" then self:consume() end
+                    while self:peek():match("%d") do self:consume() end
+                end
+            end
             table.insert(self.tokens, { type = "number", value = self.source:sub(s, self.pos - 1), line = self.line })
         elseif c == "'" or c == "\"" then
-            local s = self.pos; local q = self:consume()
-            while self.pos <= #self.source and self:peek() ~= q do if self:peek() == "\\" then self:consume() end; self:consume() end
-            self:consume(); table.insert(self.tokens, { type = "string", value = self.source:sub(s + 1, self.pos - 2), line = self.line })
-        elseif c == "[" and self.source:sub(self.pos, self.pos + 1) == "[[" then
+            local q = self:consume(); local res = {}
+            while self.pos <= #self.source and self:peek() ~= q do
+                local nc = self:consume()
+                if nc == "\\" then
+                    local esc = self:consume()
+                    if esc == "x" then
+                        local hex = self:consume() .. self:consume()
+                        table.insert(res, string.char(tonumber(hex, 16)))
+                    elseif esc == "u" then
+                        self:expect_char("{")
+                        local hex = ""
+                        while self:peek() ~= "}" do hex = hex .. self:consume() end
+                        self:consume()
+                        local code = tonumber(hex, 16)
+                        -- Simple UTF-8 encoding
+                        if code < 0x80 then table.insert(res, string.char(code))
+                        elseif code < 0x800 then table.insert(res, string.char(0xC0 + math.floor(code / 0x40), 0x80 + (code % 0x40)))
+                        elseif code < 0x10000 then table.insert(res, string.char(0xE0 + math.floor(code / 0x1000), 0x80 + (math.floor(code / 0x40) % 0x40), 0x80 + (code % 0x40)))
+                        end
+                    elseif esc:match("%d") then
+                        local dec = esc; if self:peek():match("%d") then dec = dec .. self:consume() end; if self:peek():match("%d") then dec = dec .. self:consume() end
+                        table.insert(res, string.char(tonumber(dec)))
+                    elseif esc == "n" then table.insert(res, "\n")
+                    elseif esc == "r" then table.insert(res, "\r")
+                    elseif esc == "t" then table.insert(res, "\t")
+                    elseif esc == "\\" then table.insert(res, "\\")
+                    elseif esc == q then table.insert(res, q)
+                    else table.insert(res, esc) end
+                else table.insert(res, nc) end
+            end
+            self:consume(); table.insert(self.tokens, { type = "string", value = table.concat(res), line = self.line })
+        elseif c == "[" and self:peek(1) == "[" then
             self:consume(); self:consume(); local s = self.pos
             while self.pos <= #self.source and self.source:sub(self.pos, self.pos + 1) ~= "]]" do self:consume() end
             table.insert(self.tokens, { type = "string", value = self.source:sub(s, self.pos - 1), line = self.line })
             self:consume(); self:consume()
-        elseif c == "-" and self.source:sub(self.pos, self.pos + 1) == "--" then
-            while self.pos <= #self.source and self:peek() ~= "\n" do self:consume() end
+        elseif c == "-" and self:peek(1) == "-" then
+            self:consume(); self:consume()
+            if self:peek() == "[" and self:peek(1) == "[" then
+                self:consume(); self:consume()
+                while self.pos <= #self.source and self.source:sub(self.pos, self.pos + 1) ~= "]]" do self:consume() end
+                self:consume(); self:consume()
+            else
+                while self.pos <= #self.source and self:peek() ~= "\n" do self:consume() end
+            end
         elseif c:match("[%p]") then
             local tri = self.source:sub(self.pos, self.pos + 2)
             local duo = self.source:sub(self.pos, self.pos + 1)
@@ -44,6 +86,8 @@ function Lexer:tokenize()
     end
     table.insert(self.tokens, { type = "eof", value = "eof", line = self.line }); return self.tokens
 end
+function Lexer:expect_char(c) if self:consume() ~= c then error("Expected " .. c) end end
+
 local Parser = {}
 function Parser.new(tokens) return setmetatable({ tokens = tokens, pos = 1 }, { __index = Parser }) end
 function Parser:peek() return self.tokens[self.pos] end
@@ -93,6 +137,8 @@ function Parser:parseStatement()
             self:expect("do"); local body = self:parseBlock(); self:expect("end"); return { type = "ForIn", vars = vars, iter = iter, body = body }
         end
     elseif t.value == "break" then self:consume(); return { type = "Break" }
+    elseif t.value == "goto" then self:consume(); return { type = "Goto", label = self:expect("name").value }
+    elseif t.value == "::" then self:consume(); local name = self:expect("name").value; self:expect("::"); return { type = "Label", name = name }
     elseif t.value == "function" then
         self:consume(); local name = self:expect("name").value; local node = { type = "Var", name = name }
         while self:peek().value == "." do self:consume(); node = { type = "Index", table = node, key = { type = "String", value = self:expect("name").value } } end
@@ -164,11 +210,12 @@ function Parser:parseTable()
     self:expect("{"); local fields = {}
     while self:peek().value ~= "}" do
         if self:peek().value == "[" then self:consume(); local k = self:parseExpr(); self:expect("]"); self:expect("="); table.insert(fields, { key = k, value = self:parseExpr() })
-        elseif self:peek().type == "name" and self.tokens[self.pos + 1].value == "=" then local k = { type = "String", value = self:consume().value }; self:expect("="); table.insert(fields, { key = k, value = self:parseExpr() })
+        elseif self:peek().type == "name" and self:peek(1).value == "=" then local k = { type = "String", value = self:consume().value }; self:expect("="); table.insert(fields, { key = k, value = self:parseExpr() })
         else table.insert(fields, { value = self:parseExpr() }) end
         if self:peek().value == "," or self:peek().value == ";" then self:consume() else break end
     end; self:expect("}"); return { type = "Table", fields = fields }
 end
+
 local Obfuscator = {}
 local sc = 0; local function gsn() sc = sc + 1; return "_syn_" .. sc end
 function Obfuscator.desugar(ast)
@@ -329,14 +376,18 @@ function Obfuscator.applyMBA(ast)
     return walk(ast)
 end
 function Obfuscator.obfuscateIdentifiers(ast)
-    local gm = {}; local gr = {}; local c = 0; local function gnn() c = c + 1; return string.format("_0x%X", c + 0xABCDEF) end
+    local gm = {}; local gr = {}; local c = 0; local function gnn()
+        c = c + 1; local name = string.format("_0x%X", c + 0xABCDEF)
+        while gr[name] or gm[name] do c = c + 1; name = string.format("_0x%X", c + 0xABCDEF) end
+        return name
+    end
     local function walk(n, s)
         if not n or type(n) ~= "table" then return end
         if n.type == "Block" then local ns = { parent = s, locals = {} }; for i, v in ipairs(n.body) do walk(v, ns) end
         elseif n.type == "LocalAssign" then
             if n.is_recursive then for i, v in ipairs(n.vars) do local nn = gnn(); s.locals[v] = nn; n.vars[i] = nn end; if n.values then for _, v in ipairs(n.values) do walk(v, s) end end
             else if n.values then for _, v in ipairs(n.values) do walk(v, s) end end; for i, v in ipairs(n.vars) do local nn = gnn(); s.locals[v] = nn; n.vars[i] = nn end end
-        elseif n.type == "Var" then local cur = s; local f = false; while cur do if cur.locals[n.name] then n.name = cur.locals[n.name]; f = true; break end; cur = cur.parent end; if not f then if not gr[n.name] then gr[n.name] = gnn(); gm[gr[n.name]] = n.name end; n.name = gr[n.name] end
+        elseif n.type == "Var" then local cur = s; local f = false; while cur do if cur.locals[n.name] then n.name = cur.locals[n.name]; f = true; break end; cur = cur.parent end; if not f then if not gr[n.name] then local nn = gnn(); gr[n.name] = nn; gm[nn] = n.name end; n.name = gr[n.name] end
         elseif n.type == "FunctionDef" then local fs = { parent = s, locals = {} }; for i, v in ipairs(n.args) do if v ~= "..." then local nn = gnn(); fs.locals[v] = nn; n.args[i] = nn end end; walk(n.body, fs)
         elseif n.type == "If" then walk(n.cond, s); walk(n.body, s); for _, v in ipairs(n.elseifs) do walk(v.cond, s); walk(v.body, s) end; walk(n.elseBlock, s)
         elseif n.type == "While" then walk(n.cond, s); walk(n.body, s)
@@ -347,6 +398,7 @@ function Obfuscator.obfuscateIdentifiers(ast)
         elseif n.type == "Index" then walk(n.table, s); walk(n.key, s)
         elseif n.type == "Table" then for _, f in ipairs(n.fields) do if f.key then walk(f.key, s) end; walk(f.value, s) end
         elseif n.type == "Return" then for _, v in ipairs(n.values) do walk(v, s) end
+        elseif n.type == "Goto" or n.type == "Label" then -- ignore for now
         end
     end; walk(ast, { locals = {} }); return gm
 end
@@ -354,7 +406,10 @@ local Virtualizer = {}
 function Virtualizer.virtualize(ast, gm)
     local ops_list = { "LOADK", "GETVAR", "SETVAR", "GETTABLE", "SETTABLE", "SETTABLE_IMM", "SETTABLE_MULTI", "NEWTABLE", "CALL", "CALL_M", "RET", "RET_M", "VARARG", "VARARG_M", "JMP", "JMP_IF_FALSE", "JMP_IF_TRUE", "ADD", "SUB", "MUL", "DIV", "MOD", "EQ", "NE", "LT", "GT", "LE", "GE", "CONCAT", "NOT", "LEN", "UNM", "AND", "OR", "CLOSURE", "LOAD_VA", "PICK_RESULT", "POP", "DUP", "SWAP", "BREAK", "BOR", "BXOR", "BAND", "SHL", "SHR", "IDIV", "BNOT", "NOP" }
     local XK = math.random(1, 0xFFFFFF); local SX = math.random(1, 255)
-    local function xor_s(s, k) local r = {}; for i=1, #s do table.insert(r, string.char(s:byte(i) ~ k)) end; return table.concat(r) end
+    local function xor_s(s, k)
+        if type(s) ~= "string" then return s end
+        local r = {}; for i=1, #s do table.insert(r, string.char(s:byte(i) ~ k)) end; return table.concat(r)
+    end
     local function encrypt_k(v, k)
         local s
         if type(v) == "string" then s = "s" .. v
@@ -366,6 +421,7 @@ function Virtualizer.virtualize(ast, gm)
     end
     local function pp(block, args)
         local instructions = {}; local constants = { n = 0 }; local loop_exits = {}; local locals_map = {}
+        local labels = {}; local gotos = {}
         local function addK(v) for i=1, constants.n do if constants[i] == v then return i end end; constants.n = constants.n + 1; constants[constants.n] = v; return constants.n end
         local function emit(op, arg)
             if math.random() > 0.8 then
@@ -420,8 +476,12 @@ function Virtualizer.virtualize(ast, gm)
             elseif n.type == "Return" then if #n.values == 1 and (n.values[1].type == "Call" or n.values[1].type == "MemberCall" or n.values[1].type == "Vararg") then walk(n.values[1], true); emit("RET_M", 0) else for _, v in ipairs(n.values) do walk(v) end; emit("RET", #n.values) end
             elseif n.type == "FunctionDef" then local child_proto = pp(n.body, n.args); emit("CLOSURE", addK(child_proto))
             elseif n.type == "Break" then if #loop_exits > 0 then table.insert(loop_exits[#loop_exits], emit("JMP", 0)) else error("Break outside loop") end
+            elseif n.type == "Goto" then table.insert(gotos, { name = n.label, inst = emit("JMP", 0) })
+            elseif n.type == "Label" then labels[n.name] = #instructions + 1
             end
-        end; walk(block, false, true); if #instructions == 0 or instructions[#instructions].op ~= "RET" then emit("RET", 0) end; local locals_list = {}; for k in pairs(locals_map) do table.insert(locals_list, k) end; return { b = instructions, k = constants, l = locals_list }
+        end; walk(block, false, true); if #instructions == 0 or instructions[#instructions].op ~= "RET" then emit("RET", 0) end
+        for _, g in ipairs(gotos) do if labels[g.name] then instructions[g.inst].arg = labels[g.name] else error("Label " .. g.name .. " not found") end end
+        local locals_list = {}; for k in pairs(locals_map) do table.insert(locals_list, k) end; return { b = instructions, k = constants, l = locals_list }
     end
     local main_proto = pp(ast); local function sp(p)
         local op_map = {}; local id_to_op = {}; local current_id = 1
@@ -447,7 +507,9 @@ end
 local Wrapper = {}
 function Wrapper.generate(main, xk, om, gm, sx, integrity)
     local function sk(ks) local s = "{"; for i=1, (ks.n or #ks) do local v = ks[i]
-        if type(v) == "string" then s = s .. string.format("%q", v) .. ","
+        if type(v) == "string" then
+            local res = {}; for j=1, #v do table.insert(res, string.format("\\%d", v:byte(j))) end
+            s = s .. "\"" .. table.concat(res) .. "\","
         elseif type(v) == "boolean" or type(v) == "number" then s = s .. tostring(v) .. ","
         elseif type(v) == "table" and v.b then s = s .. Wrapper._sp(v) .. ","
         else s = s .. "nil," end end; return s .. "}" end
