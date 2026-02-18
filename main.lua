@@ -1,3 +1,8 @@
+require "import"
+import "android.widget.*"
+import "android.view.*"
+import "androidx.cardview.widget.CardView"
+
 local Lexer = require("obfuscator.lexer")
 local Parser = require("obfuscator.parser")
 local Virtualizer = require("obfuscator.virtualizer")
@@ -104,20 +109,21 @@ end
 -- Androlua+ UI logic (only runs if 'activity' exists)
 if activity then
   local layout = require("layout")
-  activity.setContentView(loadlayout(layout))
+  local views = {}
+  activity.setContentView(loadlayout(layout, views))
 
-  btn_obfuscate.onClick = function()
-    local input_path = tostring(edit_path.text)
+  views.btn_obfuscate.onClick = function()
+    local input_path = tostring(views.edit_path.text)
     if input_path == "" then print("请先输入路径") return end
 
     local options = {
-      int_rate = sb_int_rate.progress / 100,
-      junk_rate = cb_junk.checked and (sb_junk_rate.progress / 100) or 0,
-      identify_deps = cb_dep.checked,
+      int_rate = views.sb_int_rate.progress / 100,
+      junk_rate = views.cb_junk.checked and (views.sb_junk_rate.progress / 100) or 0,
+      identify_deps = views.cb_dep.checked,
     }
 
-    btn_obfuscate.setEnabled(false)
-    btn_obfuscate.setText("正在混淆...")
+    views.btn_obfuscate.setEnabled(false)
+    views.btn_obfuscate.setText("正在混淆...")
 
     thread(function(path, opts, tool_path)
       require "import"
@@ -130,8 +136,8 @@ if activity then
   end
 
   function obf_done(ok, res, err)
-    btn_obfuscate.setEnabled(true)
-    btn_obfuscate.setText("开始混淆")
+    views.btn_obfuscate.setEnabled(true)
+    views.btn_obfuscate.setText("开始混淆")
     if ok and res then
        print("混淆成功！输出至: " .. res)
     else
