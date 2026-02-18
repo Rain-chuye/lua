@@ -7,6 +7,28 @@ local BytecodeParser = require("obfuscator.bytecode_parser")
 
 local ObfuscatorTool = {}
 
+function ObfuscatorTool.obfuscate_file(input_path, options)
+  local f = io.open(input_path, "rb")
+  if not f then return nil, "无法读取文件" end
+  local content = f:read("*a")
+  f:close()
+
+  local success, result = pcall(ObfuscatorTool.obfuscate, content, options)
+  if not success then return nil, result end
+
+  local output_path = input_path:gsub("%.lua$", "obf.lua")
+  if output_path == input_path then
+     output_path = input_path .. "obf.lua"
+  end
+
+  local f_out = io.open(output_path, "w")
+  if not f_out then return nil, "无法写入文件" end
+  f_out:write(result)
+  f_out:close()
+
+  return output_path
+end
+
 function ObfuscatorTool.obfuscate(input, options)
   local proto
   local deps_comments = ""
@@ -76,21 +98,38 @@ if activity then
   activity.setContentView(loadlayout(layout))
 
   btn_obfuscate.onClick = function()
-    -- In a real app, you'd get source from an EditText or file
-    local source = "print('Hello World')" -- placeholder
+    -- In Androlua+, you might use a path from an input field
+    -- Here we use a placeholder or previous input
+    local input_path = "/sdcard/test.lua" -- placeholder
+    if edit_path then input_path = tostring(edit_path.text) end
+
     local options = {
       int_rate = sb_int_rate.progress / 100,
       junk_rate = cb_junk.checked and (sb_junk_rate.progress / 100) or 0,
       identify_deps = cb_dep.checked,
     }
 
-    local success, result = pcall(ObfuscatorTool.obfuscate, source, options)
-    if success then
-       print("混淆成功！")
-       -- Save to file or show result
+    local output_path, err = ObfuscatorTool.obfuscate_file(input_path, options)
+    if output_path then
+       print("混淆成功！输出至: " .. output_path)
     else
-       print("混淆失败: " .. result)
+       print("混淆失败: " .. tostring(err))
     end
+  end
+end
+
+-- CLI support
+if arg and arg[1] then
+  local options = {
+    int_rate = 0.5,
+    junk_rate = 0.1,
+    identify_deps = true,
+  }
+  local out, err = ObfuscatorTool.obfuscate_file(arg[1], options)
+  if out then
+    print("Obfuscated: " .. out)
+  else
+    print("Error: " .. tostring(err))
   end
 end
 
