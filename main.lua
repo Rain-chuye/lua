@@ -30,9 +30,9 @@ function ObfuscatorTool.obfuscate(input, options)
     proto = virtualizer:virtualize(ast)
   end
 
-  -- Apply obfuscation to packed proto
+  -- Apply obfuscation to proto
+  engine:obfuscate_proto(proto)
   local packed = virtualizer:pack_proto(proto)
-  engine:obfuscate_proto(packed)
 
   -- Serialize packed proto to Lua table string
   local function serialize(t)
@@ -47,7 +47,7 @@ function ObfuscatorTool.obfuscate(input, options)
 
       local res = "{"
       for k, v in pairs(t) do
-        local key = type(k) == "number" and "" or (k .. "=")
+        local key = type(k) == "number" and ("[" .. k .. "]=") or (k .. "=")
         res = res .. key .. serialize(v) .. ","
       end
       return res .. "}"
@@ -59,7 +59,13 @@ function ObfuscatorTool.obfuscate(input, options)
   end
 
   local packed_s = serialize(packed)
-  local final_code = deps_comments .. string.format(vm_template, packed_s, virtualizer.xor_key, virtualizer.xor_key)
+  -- Use gsub to avoid string.format limits and issues with %
+  local final_code = vm_template:gsub("%%s", function()
+    local res = packed_s
+    packed_s = tostring(virtualizer.xor_key) -- sequential replacement
+    return res
+  end)
+  final_code = deps_comments .. final_code
 
   return final_code
 end

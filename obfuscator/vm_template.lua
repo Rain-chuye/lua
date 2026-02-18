@@ -1,20 +1,38 @@
-local vm_template = [=[
+local vm_template = [==[
 return (function(_PR, _K1, _K2)
   local _G = _G or getfenv()
   local _ENV = _ENV or _G
   local _UP = {}
 
-  local function _EXEC(_PR, _ENV, _UP)
+  local function _EXEC(_PR, _ENV, _UP, ...)
     local _B = _PR.b
     local _K = _PR.k
     local _P = _PR.p
     local _M = _PR.m
-    local _S = {}
+    local _S = { ... }
     local _PC = 1
     local _DF = {}
 
     local function _DECODE(v, i)
       return (v ~ _K1 ~ i)
+    end
+
+    local function _GETK(idx)
+      local kv = _K[idx + 1]
+      if type(kv) == "table" then
+        if kv.data then
+          local s = ""
+          for _, b in ipairs(kv.data) do
+            s = s .. string.char(((b ~ kv.keys[3]) - kv.keys[2]) % 256 ~ kv.keys[1])
+          end
+          return s
+        elseif kv.type == "MBA_ADD" then
+          return kv.v - kv.x
+        elseif kv.type == "MBA_XOR" then
+          return kv.v ~ kv.x
+        end
+      end
+      return kv
     end
 
     local _STATE = 0
@@ -33,20 +51,7 @@ return (function(_PR, _K1, _K2)
         if _STATE == 7 then -- MOVE
           _S[_A] = _S[_B_ARG]
         elseif _STATE == 14 then -- LOADK
-          local _KV = _K[_B_ARG + 1]
-          if type(_KV) == "table" and _KV.data then
-             local s = ""
-             for _, b in ipairs(_KV.data) do
-               s = s .. string.char(((b ~ _KV.keys[3]) - _KV.keys[2]) % 256 ~ _KV.keys[1])
-             end
-             _S[_A] = s
-          elseif type(_KV) == "table" and _KV.type == "MBA_ADD" then
-             _S[_A] = _KV.v - _KV.x
-          elseif type(_KV) == "table" and _KV.type == "MBA_XOR" then
-             _S[_A] = _KV.v ~ _KV.x
-          else
-             _S[_A] = _KV
-          end
+          _S[_A] = _GETK(_B_ARG)
         elseif _STATE == 21 then -- LOADBOOL
           _S[_A] = (_B_ARG ~= 0)
           if _C ~= 0 then _PC = _PC + 1 end
@@ -54,18 +59,21 @@ return (function(_PR, _K1, _K2)
           _S[_A] = nil
         elseif _STATE == 35 then -- GETUPVAL
           _S[_A] = _UP[_B_ARG + 1].v
-        elseif _STATE == 63 then -- SETUPVAL
-          _UP[_B_ARG + 1].v = _S[_A]
         elseif _STATE == 42 then -- GETGLOBAL
-          _S[_A] = _ENV[_K[_B_ARG + 1]]
+          _S[_A] = _ENV[_GETK(_B_ARG)]
         elseif _STATE == 49 then -- GETTABLE
           _S[_A] = _S[_B_ARG][_S[_C]]
         elseif _STATE == 56 then -- SETGLOBAL
-          _ENV[_K[_A + 1]] = _S[_B_ARG]
+          _ENV[_GETK(_A)] = _S[_B_ARG]
+        elseif _STATE == 63 then -- SETUPVAL
+          _UP[_B_ARG + 1].v = _S[_A]
         elseif _STATE == 70 then -- SETTABLE
           _S[_A][_S[_B_ARG]] = _S[_C]
         elseif _STATE == 77 then -- NEWTABLE
           _S[_A] = {}
+        elseif _STATE == 84 then -- SELF
+          _S[_A + 1] = _S[_B_ARG]
+          _S[_A] = _S[_B_ARG][_GETK(_C)]
         elseif _STATE == 91 then -- ADD
           _S[_A] = _S[_B_ARG] + _S[_C]
         elseif _STATE == 98 then -- SUB
@@ -74,12 +82,33 @@ return (function(_PR, _K1, _K2)
           _S[_A] = _S[_B_ARG] * _S[_C]
         elseif _STATE == 112 then -- DIV
           _S[_A] = _S[_B_ARG] / _S[_C]
+        elseif _STATE == 119 then -- IDIV
+          _S[_A] = _S[_B_ARG] // _S[_C]
+        elseif _STATE == 126 then -- MOD
+          _S[_A] = _S[_B_ARG] % _S[_C]
+        elseif _STATE == 133 then -- POW
+          _S[_A] = _S[_B_ARG] ^ _S[_C]
+        elseif _STATE == 140 then -- UNM
+          _S[_A] = -_S[_B_ARG]
+        elseif _STATE == 147 then -- NOT
+          _S[_A] = not _S[_B_ARG]
+        elseif _STATE == 154 then -- LEN
+          _S[_A] = #_S[_B_ARG]
+        elseif _STATE == 161 then -- CONCAT
+          _S[_A] = _S[_B_ARG] .. _S[_C]
         elseif _STATE == 168 then -- JMP
           _PC = _PC + _B_ARG
+        elseif _STATE == 175 then -- EQ
+          _S[_A] = (_S[_B_ARG] == _S[_C])
+        elseif _STATE == 182 then -- LT
+          _S[_A] = (_S[_B_ARG] < _S[_C])
+        elseif _STATE == 189 then -- LE
+          _S[_A] = (_S[_B_ARG] <= _S[_C])
         elseif _STATE == 210 then -- CALL
           local args = {}
           for i = 1, _B_ARG do table.insert(args, _S[_A + i]) end
-          local res = { _S[_A](table.unpack(args)) }
+          local func = _S[_A]
+          local res = { func(table.unpack(args)) }
           for i = 1, _C do _S[_A + i - 1] = res[i] end
         elseif _STATE == 224 then -- RET
           for i = #_DF, 1, -1 do _DF[i]() end
@@ -105,9 +134,11 @@ return (function(_PR, _K1, _K2)
             _S[_A - 1] = _S[_A]
             _PC = _PC + _B_ARG
           end
+        elseif _STATE == 259 then -- SETLIST
+          local t = _S[_A]
+          t[_B_ARG] = _S[_C]
         elseif _STATE == 266 then -- CLOSURE
           local child_pr = _P[_B_ARG + 1]
-          -- capture upvalues (simplified)
           local _captured = {}
           for i, uv in ipairs(child_pr.upvalues or {}) do
             if uv.type == "local" then
@@ -117,31 +148,37 @@ return (function(_PR, _K1, _K2)
             end
           end
           _S[_A] = function(...)
-             return _EXEC(child_pr, _ENV, _captured)
+             return _EXEC(child_pr, _ENV, _captured, ...)
           end
         elseif _STATE == 287 then -- NEWARRAY
           _S[_A] = {}
         elseif _STATE == 294 then -- JMP_IF_FALSE
           if not _S[_A] then _PC = _PC + _B_ARG end
+        elseif _STATE == 301 then -- JMP_IF_TRUE
+          if _S[_A] then _PC = _PC + _B_ARG end
         elseif _STATE == 308 then -- DEFER
           local child_pr = _P[_A + 1]
           table.insert(_DF, function() _EXEC(child_pr, _ENV, _UP) end)
         elseif _STATE == 315 then -- TBC
           local val = _S[_A]
-        elseif _STATE == 175 then -- EQ
-          _S[_A] = (_S[_B_ARG] == _S[_C])
         elseif _STATE == 322 then -- NE
           _S[_A] = (_S[_B_ARG] ~= _S[_C])
-        elseif _STATE == 182 then -- LT
-          _S[_A] = (_S[_B_ARG] < _S[_C])
-        elseif _STATE == 189 then -- LE
-          _S[_A] = (_S[_B_ARG] <= _S[_C])
         elseif _STATE == 329 then -- GT
           _S[_A] = (_S[_B_ARG] > _S[_C])
         elseif _STATE == 336 then -- GE
           _S[_A] = (_S[_B_ARG] >= _S[_C])
-        elseif _STATE == 161 then -- CONCAT
-          _S[_A] = _S[_B_ARG] .. _S[_C]
+        elseif _STATE == 343 then -- BITAND
+          _S[_A] = _S[_B_ARG] & _S[_C]
+        elseif _STATE == 350 then -- BITOR
+          _S[_A] = _S[_B_ARG] | _S[_C]
+        elseif _STATE == 357 then -- BITXOR
+          _S[_A] = _S[_B_ARG] ~ _S[_C]
+        elseif _STATE == 364 then -- SHL
+          _S[_A] = _S[_B_ARG] << _S[_C]
+        elseif _STATE == 371 then -- SHR
+          _S[_A] = _S[_B_ARG] >> _S[_C]
+        elseif _STATE == 378 then -- BITNOT
+          _S[_A] = ~_S[_B_ARG]
         end
         _STATE = 0
         _PC = _PC + 1
@@ -151,6 +188,6 @@ return (function(_PR, _K1, _K2)
 
   return _EXEC(_PR, _ENV, _UP)
 end)(%s, %s, %s)
-]=]
+]==]
 
 return vm_template

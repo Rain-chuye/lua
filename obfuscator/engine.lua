@@ -63,7 +63,9 @@ function Engine:identify_dependencies(ast)
 end
 
 function Engine:obfuscate_proto(proto)
+  if not proto then return end
   -- 1. Encrypt constants
+  proto.constants = proto.constants or {}
   for i, k in ipairs(proto.constants) do
     if type(k) == "string" then
       proto.constants[i] = self:encrypt_string(k)
@@ -87,7 +89,8 @@ function Engine:obfuscate_proto(proto)
   end
 
   -- 3. Recursive for child protos
-  for _, p in ipairs(proto.p) do
+  local children = proto.protos or proto.p or {}
+  for _, p in ipairs(children) do
     self:obfuscate_proto(p)
   end
 end

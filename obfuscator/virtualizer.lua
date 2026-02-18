@@ -119,6 +119,7 @@ function Virtualizer:process_function(body, params, parent_ctx)
   end
 
   for _, stmt in ipairs(body) do
+    ctx.temp_reg_ptr = #ctx.proto.locals
     self:gen_stmt(ctx, stmt)
   end
 
@@ -129,18 +130,23 @@ function Virtualizer:process_function(body, params, parent_ctx)
 end
 
 function Virtualizer:add_local(ctx, name)
-  local reg = self:get_temp_reg(ctx)
   table.insert(ctx.proto.locals, name)
+  local reg = #ctx.proto.locals
   ctx.scope.locals[name] = reg
+  if reg > ctx.reg_count then ctx.reg_count = reg end
   return reg
 end
 
 function Virtualizer:get_temp_reg(ctx)
-  if #ctx.free_regs > 0 then
-    return table.remove(ctx.free_regs)
+  -- Temps start after all currently defined locals
+  local start = #ctx.proto.locals
+  if ctx.temp_reg_ptr and ctx.temp_reg_ptr > start then
+    ctx.temp_reg_ptr = ctx.temp_reg_ptr + 1
+  else
+    ctx.temp_reg_ptr = start + 1
   end
-  ctx.reg_count = ctx.reg_count + 1
-  return ctx.reg_count
+  if ctx.temp_reg_ptr > ctx.reg_count then ctx.reg_count = ctx.temp_reg_ptr end
+  return ctx.temp_reg_ptr
 end
 
 function Virtualizer:free_reg(ctx, reg)
@@ -359,8 +365,13 @@ function Virtualizer:gen_expr(ctx, expr, reg)
   elseif expr.type == "Call" then
     local func_reg = self:get_temp_reg(ctx)
     self:gen_expr(ctx, expr.base, func_reg)
+    -- Reserve argument registers
+    local arg_regs = {}
+    for i = 1, #expr.args do
+      arg_regs[i] = self:get_temp_reg(ctx)
+    end
     for i, arg in ipairs(expr.args) do
-      self:gen_expr(ctx, arg, func_reg + i)
+      self:gen_expr(ctx, arg, arg_regs[i])
     end
     self:add_inst(ctx, "CALL", { func_reg, #expr.args, 1 })
     if reg ~= func_reg then
@@ -371,8 +382,13 @@ function Virtualizer:gen_expr(ctx, expr, reg)
     self:gen_expr(ctx, expr.base, base_reg)
     local k = self:add_k(ctx, expr.method)
     self:add_inst(ctx, "SELF", { base_reg, k })
+    -- Reserve argument registers (SELF already uses base_reg and base_reg + 1)
+    local arg_regs = {}
+    for i = 1, #expr.args do
+      arg_regs[i] = self:get_temp_reg(ctx)
+    end
     for i, arg in ipairs(expr.args) do
-      self:gen_expr(ctx, arg, base_reg + 1 + i)
+      self:gen_expr(ctx, arg, arg_regs[i])
     end
     self:add_inst(ctx, "CALL", { base_reg, #expr.args + 1, 1 })
     if reg ~= base_reg then
