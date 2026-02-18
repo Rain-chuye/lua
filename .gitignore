@@ -1,0 +1,6 @@
+lua/*.o
+lua/lua
+lua/luac
+lua/liblua.a
+test_parser.lua
+*.log
