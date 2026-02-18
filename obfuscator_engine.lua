@@ -56,17 +56,29 @@ function Lexer:tokenize()
                 else table.insert(res, nc) end
             end
             self:consume(); table.insert(self.tokens, { type = "string", value = table.concat(res), line = self.line })
-        elseif c == "[" and self:peek(1) == "[" then
-            self:consume(); self:consume(); local s = self.pos
-            while self.pos <= #self.source and self.source:sub(self.pos, self.pos + 1) ~= "]]" do self:consume() end
-            table.insert(self.tokens, { type = "string", value = self.source:sub(s, self.pos - 1), line = self.line })
-            self:consume(); self:consume()
+        elseif c == "[" and (self:peek(1) == "[" or self:peek(1) == "=") then
+            local s_pos = self.pos; self:consume(); local sep = ""
+            while self:peek() == "=" do sep = sep .. self:consume() end
+            if self:peek() == "[" then
+                self:consume(); local start = self.pos; local closing = "]" .. sep .. "]"
+                while self.pos <= #self.source and self.source:sub(self.pos, self.pos + #closing - 1) ~= closing do self:consume() end
+                local val = self.source:sub(start, self.pos - 1); for _=1, #closing do self:consume() end
+                table.insert(self.tokens, { type = "string", value = val, line = self.line })
+            else
+                self.pos = s_pos; table.insert(self.tokens, { type = "operator", value = self:consume(), line = self.line })
+            end
         elseif c == "-" and self:peek(1) == "-" then
             self:consume(); self:consume()
-            if self:peek() == "[" and self:peek(1) == "[" then
-                self:consume(); self:consume()
-                while self.pos <= #self.source and self.source:sub(self.pos, self.pos + 1) ~= "]]" do self:consume() end
-                self:consume(); self:consume()
+            if self:peek() == "[" then
+                local s_pos = self.pos; self:consume(); local sep = ""
+                while self:peek() == "=" do sep = sep .. self:consume() end
+                if self:peek() == "[" then
+                    self:consume(); local closing = "]" .. sep .. "]"
+                    while self.pos <= #self.source and self.source:sub(self.pos, self.pos + #closing - 1) ~= closing do self:consume() end
+                    for _=1, #closing do self:consume() end
+                else
+                    self.pos = s_pos; while self.pos <= #self.source and self:peek() ~= "\n" do self:consume() end
+                end
             else
                 while self.pos <= #self.source and self:peek() ~= "\n" do self:consume() end
             end
@@ -228,11 +240,28 @@ function Obfuscator.desugar(ast)
         elseif n.type == "Repeat" then
             local body = walk(n.body); local cond = walk(n.cond); return walk({ type = "While", cond = { type = "Boolean", value = true }, body = { type = "Block", body = { body, { type = "If", cond = cond, body = { type = "Block", body = { { type = "Break" } } }, elseifs = {}, elseBlock = nil } } } })
         elseif n.type == "ForRange" then
-            local _start, _stop, _step = gsn(), gsn(), gsn(); local init = { type = "LocalAssign", vars = { _start, _stop, _step }, values = { walk(n.start), walk(n.stop), n.step and walk(n.step) or { type = "Number", value = "1" } } }
-            local decl = { type = "LocalAssign", vars = { n.var }, values = { { type = "Var", name = _start } } }
-            local cond = { type = "BinaryOp", op = "<=", left = { type = "Var", name = n.var }, right = { type = "Var", name = _stop } }
-            local update = { type = "Assign", vars = { { type = "Var", name = n.var } }, values = { { type = "BinaryOp", op = "+", left = { type = "Var", name = n.var }, right = { type = "Var", name = _step } } } }
-            table.insert(n.body.body, update); return walk({ type = "Block", body = { init, decl, { type = "While", cond = cond, body = n.body } } })
+            local _start, _stop, _step = gsn(), gsn(), gsn(); local v_counter = gsn()
+            local init = { type = "LocalAssign", vars = { _start, _stop, _step }, values = {
+                { type = "Call", func = { type = "Var", name = "tonumber" }, args = { walk(n.start) } },
+                { type = "Call", func = { type = "Var", name = "tonumber" }, args = { walk(n.stop) } },
+                { type = "Call", func = { type = "Var", name = "tonumber" }, args = { n.step and walk(n.step) or { type = "Number", value = "1" } } }
+            } }
+            local decl_counter = { type = "LocalAssign", vars = { v_counter }, values = { { type = "Var", name = _start } } }
+            local cond = { type = "BinaryOp", op = "or",
+                left = { type = "BinaryOp", op = "and",
+                    left = { type = "BinaryOp", op = ">", left = { type = "Var", name = _step }, right = { type = "Number", value = "0" } },
+                    right = { type = "BinaryOp", op = "<=", left = { type = "Var", name = v_counter }, right = { type = "Var", name = _stop } }
+                },
+                right = { type = "BinaryOp", op = "and",
+                    left = { type = "BinaryOp", op = "<=", left = { type = "Var", name = _step }, right = { type = "Number", value = "0" } },
+                    right = { type = "BinaryOp", op = ">=", left = { type = "Var", name = v_counter }, right = { type = "Var", name = _stop } }
+                }
+            }
+            local decl_v = { type = "LocalAssign", vars = { n.var }, values = { { type = "Var", name = v_counter } } }
+            local update = { type = "Assign", vars = { { type = "Var", name = v_counter } }, values = { { type = "BinaryOp", op = "+", left = { type = "Var", name = v_counter }, right = { type = "Var", name = _step } } } }
+            table.insert(n.body.body, 1, decl_v)
+            table.insert(n.body.body, update)
+            return walk({ type = "Block", body = { init, decl_counter, { type = "While", cond = cond, body = n.body } } })
         elseif n.type == "ForIn" then
             local f, s, v = gsn(), gsn(), gsn(); local init = { type = "LocalAssign", vars = { f, s, v }, values = n.iter }
             for i, val in ipairs(init.values) do init.values[i] = walk(val) end
@@ -716,7 +745,24 @@ function Wrapper.generate(main, xk, om, gm, sx, integrity, pack_params)
     "    end\n" ..
     "end\n" ..
     "return " .. v_exec .. "(" .. Wrapper._sp(main) .. ", nil, ...)"
-    return body
+
+    local l2_key = math.random(1, 255)
+    local function l2_enc(s, k)
+        local r = {}
+        for i=1, #s do table.insert(r, string.format("\\%03d", s:byte(i) ~ k)) end
+        return table.concat(r)
+    end
+    local v_l2k = string.format("_0x%X", math.random(0x1000, 0xFFFF))
+    local v_eb = string.format("_0x%X", math.random(0x1000, 0xFFFF))
+    local v_db = string.format("_0x%X", math.random(0x1000, 0xFFFF))
+    local v_li = string.format("_0x%X", math.random(0x1000, 0xFFFF))
+    local loader = "local " .. v_l2k .. " = " .. l2_key .. "; " ..
+    "if (function() local _h = (debug or {}).gethook; return _h and _h() end)() then while true do end end; " ..
+    "if (function() local _p = print; return _p ~= print end)() then while true do end end; " ..
+    "local " .. v_eb .. " = \"" .. l2_enc(body, l2_key) .. "\"; local " .. v_db .. " = \"\"; " ..
+    "for " .. v_li .. "=1, #" .. v_eb .. " do " .. v_db .. " = " .. v_db .. " .. string.char(" .. v_eb .. ":byte(" .. v_li .. ") ~ " .. v_l2k .. ") end; " ..
+    "(load or loadstring)(" .. v_db .. ")(...)"
+    return loader
 end
 function Obfuscator.obfuscate(source, options)
     options = options or { mba = true, integrity = true, fake = true, commercial = true }
