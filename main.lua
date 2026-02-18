@@ -4,6 +4,7 @@ local Virtualizer = require("obfuscator.virtualizer")
 local Engine = require("obfuscator.engine")
 local vm_template = require("obfuscator.vm_template")
 local BytecodeParser = require("obfuscator.bytecode_parser")
+local Wrapper = require("obfuscator.wrapper")
 
 local ObfuscatorTool = {}
 
@@ -81,13 +82,21 @@ function ObfuscatorTool.obfuscate(input, options)
   end
 
   local packed_s = serialize(packed)
-  -- Use gsub to avoid string.format limits and issues with %
-  local final_code = vm_template:gsub("%%s", function()
-    local res = packed_s
-    packed_s = tostring(virtualizer.xor_key) -- sequential replacement
-    return res
-  end)
-  final_code = deps_comments .. final_code
+  local final_code = Wrapper.generate(vm_template, packed_s, virtualizer.xor_key, virtualizer.xor_key)
+
+  -- String escaping to \ddd with segmentation
+  local segments = {}
+  local current = ""
+  for i = 1, #final_code do
+    current = current .. "\\" .. string.format("%03d", final_code:byte(i))
+    if #current > 4000 then
+      table.insert(segments, "\"" .. current .. "\"")
+      current = ""
+    end
+  end
+  if #current > 0 then table.insert(segments, "\"" .. current .. "\"") end
+
+  final_code = deps_comments .. "load(" .. table.concat(segments, "..") .. ")()"
 
   return final_code
 end
@@ -98,10 +107,8 @@ if activity then
   activity.setContentView(loadlayout(layout))
 
   btn_obfuscate.onClick = function()
-    -- In Androlua+, you might use a path from an input field
-    -- Here we use a placeholder or previous input
-    local input_path = "/sdcard/test.lua" -- placeholder
-    if edit_path then input_path = tostring(edit_path.text) end
+    local input_path = tostring(edit_path.text)
+    if input_path == "" then print("请先输入路径") return end
 
     local options = {
       int_rate = sb_int_rate.progress / 100,
@@ -109,11 +116,26 @@ if activity then
       identify_deps = cb_dep.checked,
     }
 
-    local output_path, err = ObfuscatorTool.obfuscate_file(input_path, options)
-    if output_path then
-       print("混淆成功！输出至: " .. output_path)
+    btn_obfuscate.setEnabled(false)
+    btn_obfuscate.setText("正在混淆...")
+
+    thread(function(path, opts, tool_path)
+      require "import"
+      package.path = tool_path .. "/?.lua;" .. package.path
+      local tool = require("main")
+      local ok, res, err = pcall(tool.obfuscate_file, path, opts)
+
+      call("obf_done", ok, res, err)
+    end, input_path, options, activity.getLuaDir())
+  end
+
+  function obf_done(ok, res, err)
+    btn_obfuscate.setEnabled(true)
+    btn_obfuscate.setText("开始混淆")
+    if ok and res then
+       print("混淆成功！输出至: " .. res)
     else
-       print("混淆失败: " .. tostring(err))
+       print("混淆失败: " .. tostring(res or err))
     end
   end
 end

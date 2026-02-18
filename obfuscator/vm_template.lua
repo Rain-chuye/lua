@@ -1,7 +1,7 @@
 local vm_template = [==[
 return (function(_PR, _K1, _K2)
-  local _G = _G or getfenv()
-  local _ENV = _ENV or _G
+  local _G = _G or (type(getfenv) == 'function' and getfenv() or _ENV or {})
+  local _ENV = _G
   local _UP = {}
 
   local function _EXEC(_PR, _ENV, _UP, ...)
@@ -179,6 +179,22 @@ return (function(_PR, _K1, _K2)
           _S[_A] = _S[_B_ARG] >> _S[_C]
         elseif _STATE == 378 then -- BITNOT
           _S[_A] = ~_S[_B_ARG]
+        elseif _STATE == 385 then -- GETTABUP
+          _S[_A] = _UP[_B_ARG + 1].v[_GETK(_C)]
+        elseif _STATE == 392 then -- SETTABUP
+          _UP[_A + 1].v[_GETK(_B_ARG)] = _S[_C]
+        elseif _STATE == 399 then -- LOADKX
+          _PC = _PC + 1
+          local _NEXT_INST = _DECODE(_B[_PC], _PC)
+          local _K_IDX = (_NEXT_INST >> 8) & 0xFFFFFF
+          _S[_A] = _GETK(_K_IDX)
+        elseif _STATE == 406 then -- TEST
+          if not _S[_A] == (_C ~= 0) then _PC = _PC + 1 end
+        elseif _STATE == 413 then -- TESTSET
+          if not _S[_B_ARG] == (_C ~= 0) then _PC = _PC + 1 else _S[_A] = _S[_B_ARG] end
+        elseif _STATE == 273 then -- VARARG
+          local _V = { ... }
+          for i = 1, _B_ARG - 1 do _S[_A + i - 1] = _V[i] end
         end
         _STATE = 0
         _PC = _PC + 1

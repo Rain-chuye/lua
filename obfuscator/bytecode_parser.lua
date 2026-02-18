@@ -130,6 +130,14 @@ function BytecodeParser:decode_lua53(inst)
     args = { a, sbx }
   elseif name == "LOADK" or name == "CLOSURE" then
     args = { a, bx }
+  elseif name == "LOADKX" then
+    args = { a }
+  elseif name == "TEST" then
+    args = { a, 0, c }
+  elseif name == "TESTSET" then
+    args = { a, b, c }
+  elseif name == "TAILCALL" then
+    name = "CALL"
   end
 
   return { op = name, args = args }

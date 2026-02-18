@@ -13,7 +13,8 @@ local OP_MAP = {
   -- Custom/Androlua+
   NEWARRAY = 40, JMP_IF_FALSE = 41, JMP_IF_TRUE = 42, DEFER = 43, TBC = 44,
   NE = 45, GT = 46, GE = 47, BITAND = 48, BITOR = 49, BITXOR = 50,
-  SHL = 51, SHR = 52, BITNOT = 53,
+  SHL = 51, SHR = 52, BITNOT = 53, GETTABUP = 54, SETTABUP = 55,
+  LOADKX = 56, TEST = 57, TESTSET = 58, GETTABUP = 54, SETTABUP = 55,
 }
 
 function Virtualizer.new()
