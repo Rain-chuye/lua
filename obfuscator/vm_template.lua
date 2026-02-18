@@ -1,4 +1,4 @@
-local vm_template = [[
+local vm_template = [=[
 return (function(_PR, _K1, _K2)
   local _G = _G or getfenv()
   local _ENV = _ENV or _G
@@ -151,6 +151,6 @@ return (function(_PR, _K1, _K2)
 
   return _EXEC(_PR, _ENV, _UP)
 end)(%s, %s, %s)
-]]
+]=]
 
 return vm_template
