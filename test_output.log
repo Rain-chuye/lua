@@ -1,5 +1,0 @@
-1	y	3
-0	nil	nil
-
-nil	nil
-Run failed: [string "return (function(...)..."]:152: table index is nil
