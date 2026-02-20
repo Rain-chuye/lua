@@ -1,5 +1,5 @@
 math.randomseed(math.floor(os.time() + os.clock()))
-local ops_list = { "DEFER", "LOADK", "GETVAR", "SETVAR", "GETVAR_G", "SETVAR_G", "GETTABLE", "SETTABLE", "NEWTABLE", "CALL", "RET", "ADD", "SUB", "MUL", "DIV", "IDIV", "MOD", "POW", "BAND", "BOR", "BXOR", "SHL", "SHR", "EQ", "LT", "LE", "CONCAT", "NOT", "UNM", "BNOT", "LEN", "CLOSURE", "LOAD_VA", "LOAD_VARARG", "PICK_RESULT", "POP", "DUP", "SWAP", "JMP", "JMP_IF_FALSE", "GETVAR_G_CALL", "LOADK_SETVAR" }
+local ops_list = { "DEFER", "LOADK", "GETVAR", "SETVAR", "GETVAR_G", "SETVAR_G", "GETTABLE", "SETTABLE", "NEWTABLE", "CALL", "RET", "ADD", "SUB", "MUL", "DIV", "IDIV", "MOD", "POW", "BAND", "BOR", "BXOR", "SHL", "SHR", "EQ", "LT", "LE", "CONCAT", "NOT", "UNM", "BNOT", "LEN", "CLOSURE", "LOAD_VA", "LOAD_VARARG", "PICK_RESULT", "POP", "DUP", "SWAP", "JMP", "JMP_IF_FALSE" }
 
 local Lexer = {}
 function Lexer.new(source) return setmetatable({ source = source, pos = 1, tokens = {}, line = 1 }, { __index = Lexer }) end
@@ -402,11 +402,15 @@ end
 
 local Virtualizer = {}
 function Virtualizer.virtualize(ast, gm)
-    local ops_list = { "DEFER", "LOADK", "GETVAR", "SETVAR", "GETVAR_G", "SETVAR_G", "GETTABLE", "SETTABLE", "NEWTABLE", "CALL", "RET", "ADD", "SUB", "MUL", "DIV", "IDIV", "MOD", "POW", "BAND", "BOR", "BXOR", "SHL", "SHR", "EQ", "LT", "LE", "CONCAT", "NOT", "UNM", "BNOT", "LEN", "CLOSURE", "LOAD_VA", "LOAD_VARARG", "PICK_RESULT", "POP", "DUP", "SWAP", "JMP", "JMP_IF_FALSE", "GETVAR_G_CALL", "LOADK_SETVAR" }
-    local XK = math.random(1, 0xFFFFFF); local SX = math.random(1, 255)
+    local ops_list = { "DEFER", "LOADK", "GETVAR", "SETVAR", "GETVAR_G", "SETVAR_G", "GETTABLE", "SETTABLE", "NEWTABLE", "CALL", "RET", "ADD", "SUB", "MUL", "DIV", "IDIV", "MOD", "POW", "BAND", "BOR", "BXOR", "SHL", "SHR", "EQ", "LT", "LE", "CONCAT", "NOT", "UNM", "BNOT", "LEN", "CLOSURE", "LOAD_VA", "LOAD_VARARG", "PICK_RESULT", "POP", "DUP", "SWAP", "JMP", "JMP_IF_FALSE" }
+    local XK = math.random(1, 0xFFFFFF); local SX1 = math.random(1, 255); local SX2 = math.random(1, 255); local SX3 = math.random(1, 255)
     local function encrypt_k(v)
         local s = (type(v) == "string" and "s" or type(v) == "number" and "n" or type(v) == "boolean" and "b" or "x") .. tostring(v == nil and "" or v == true and "t" or v == false and "f" or v)
-        local r = {}; for i=1, #s do table.insert(r, string.char(s:byte(i) ~ SX)) end; return table.concat(r)
+        local r = {}; for i=1, #s do
+            local b = s:byte(i)
+            b = ((b ~ SX1) + SX2) % 256 ~ SX3
+            table.insert(r, string.char(b))
+        end; return table.concat(r)
     end
     local function pp(block, args)
         local insts = {}; local ks = { n = 0 }; local function addK(v) for i=1, ks.n do if ks[i] == v then return i end end; ks.n = ks.n + 1; ks[ks.n] = v; return ks.n end
@@ -515,9 +519,7 @@ function Virtualizer.virtualize(ast, gm)
         while i <= #insts do
             o2n[i] = #fused + 1
             local c = insts[i]; local n_i = insts[i+1]
-            if c.op == "GETVAR_G" and n_i and n_i.op == "CALL" then table.insert(fused, { op = "GETVAR_G_CALL", arg = c.arg, arg2 = n_i.arg }); o2n[i+1] = #fused; i = i + 2
-            elseif c.op == "LOADK" and n_i and n_i.op == "SETVAR" then table.insert(fused, { op = "LOADK_SETVAR", arg = c.arg, arg2 = n_i.arg }); o2n[i+1] = #fused; i = i + 2
-            else table.insert(fused, c); i = i + 1 end
+            table.insert(fused, c); i = i + 1
         end
         o2n[#insts+1] = #fused + 1
         for _, inst in ipairs(fused) do if inst.op == "JMP" or inst.op == "JMP_IF_FALSE" then inst.arg = o2n[inst.arg] end end
@@ -536,11 +538,11 @@ function Virtualizer.virtualize(ast, gm)
             ids_to_op[id] = ops_to_idx[op]
             table.insert(ops[op], id)
         end
-        local b = {}; local rk = math.random(0, 255); local ck = math.random(0, 0xFFFFFF)
+        local b = {}; local rk = math.random(0, 255); local ck_init = math.random(0, 0xFFFFFF); local ck = ck_init
         for i, v in ipairs(p.b) do
             local op_id = ops[v.op][math.random(#ops[v.op])]
             local pck = op_id + (v.arg or 0) * 256
-            if v.arg2 then pck = op_id + (v.arg % 4096) * 256 + (v.arg2 % 4096) * 1048576 end
+            if v.arg2 then pck = op_id + (v.arg % 65536) * 256 + (v.arg2 % 65536) * 16777216 end
             local encrypted = pck ~ ((rk + i) % 256)
             encrypted = (encrypted ~ (ck % 16777216))
             ck = (ck * 13 + encrypted) % 16777216
@@ -549,13 +551,13 @@ function Virtualizer.virtualize(ast, gm)
         local em = { n = 255 }; for i = 0, 255 do em[i] = ids_to_op[i] end
         local k = { n = p.k.n }; for i = 1, p.k.n do local v = p.k[i]; if type(v) == "table" and v.b then k[i] = sp(v) else k[i] = encrypt_k(v) end end
         local cs = 0; for i=1, #b do cs = (cs + b[i]) % 1000000 end
-        return { b = b, k = k, m = em, sk = rk, cs = cs, shk = math.random(0, 0xFFFFFF), ck = math.random(0, 0xFFFFFF) }
+        return { b = b, k = k, m = em, sk = rk, cs = cs, shk = math.random(0, 0xFFFFFF), ck = ck_init }
     end
-    local egm = {}; for k, v in pairs(gm) do egm[k] = encrypt_k(v) end; return sp(main), egm, SX
+    local egm = {}; for k, v in pairs(gm) do egm[k] = encrypt_k(v) end; return sp(main), egm, {SX1, SX2, SX3}
 end
 
 local Wrapper = {}
-function Wrapper._sp(p, vn_func) return "{cs=" .. (p.cs or 0) .. ",b={" .. table.concat(p.b, ",") .. "},\nk=" .. Wrapper.sk(p.k, vn_func) .. ",\nm=" .. Wrapper.sk(p.m, vn_func) .. ",\nsk=" .. (p.sk or 0) .. ",\nshk=" .. p.shk .. "\n,ck=" .. (p.ck or 0) .. "}" end
+function Wrapper._sp(p, vn_func) return "{cs=" .. (p.cs or 0) .. ",b={" .. table.concat(p.b, ",") .. "},\nk=" .. Wrapper.sk(p.k, vn_func) .. ",\nm=" .. Wrapper.sk(p.m, vn_func) .. ",\nsk=" .. (p.sk or 0) .. ",\nshk=" .. p.shk .. ",\nck=" .. (p.ck or 0) .. "\n}" end
 function Wrapper.sk(ks, vn)
     local s = "{"; local n = ks.n or 0; if n == 0 then for k, v in pairs(ks) do if type(k) == "number" and k > n then n = k end end end
     for i=0, n do local v = ks[i]
@@ -566,7 +568,7 @@ function Wrapper.sk(ks, vn)
     end; return s .. "}"
 end
 
-function Wrapper.generate(main, gm, sx)
+function Wrapper.generate(main, gm, sxs)
     local vmap = {}
     local function vn(n) if not vmap[n] then vmap[n] = string.format("_0x%X", math.random(0x100000, 0x999999)) end; return vmap[n] end
     local state_map = {}
@@ -577,6 +579,7 @@ function Wrapper.generate(main, gm, sx)
         end; return s .. "}"
     end
     local function oq(v) return "(" .. (v - 100) .. " + 100)" end
+    local sx1, sx2, sx3 = sxs[1], sxs[2], sxs[3]
     local body = "return (function(...)\n"
     body = body .. "local "..vn("_L_ENV").." = _ENV or _G; local "..vn("_L_G").." = _G; local "..vn("_L_VAULT").." = {};\n"
     body = body .. "local "..vn("_GTY")..", "..vn("_GIP")..", "..vn("_GERR")..", "..vn("_GTON")..", "..vn("_GTOS")..", "..vn("_GPCL")..", "..vn("_GUPK")..", "..vn("_GPAI")..", "..vn("_GSEL")..", "..vn("_GCLK").." = type, ipairs, error, tonumber, tostring, pcall, (table and table.unpack or unpack), pairs, select, os.clock\n"
@@ -588,7 +591,7 @@ function Wrapper.generate(main, gm, sx)
     body = body .. "local "..vn("_GSM")..", "..vn("_GGM").." = "..vn("_L_VAULT").."['setmetatable'], "..vn("_L_VAULT").."['getmetatable']\n"
     body = body .. "if "..vn("_GSM").." then "..vn("_GPCL").."("..vn("_GSM")..", '', nil) end\n"
     body = body .. "local "..vn("_GM_RAW").." = " .. sm(gm) .. "\n"
-    body = body .. "local function "..vn("_d").."(v) if "..vn("_GTY").."(v) ~= 'string' then return v end; local r = {}; for i=1, #v do r[#r+1] = "..vn("_S_CH").."("..vn("_S_BY").."(v, i) ~ "..sx..") end; local rs = "..vn("_T_CO").."(r); local t, val = "..vn("_S_SU").."(rs,1,1), "..vn("_S_SU").."(rs,2); if t == 's' then return val elseif t == 'n' then return "..vn("_GTON").."(val) elseif t == 'b' then return val == 't' else return nil end end\n"
+    body = body .. "local function "..vn("_d").."(v) if "..vn("_GTY").."(v) ~= 'string' then return v end; local r = {}; for i=1, #v do r[#r+1] = "..vn("_S_CH").."((("..vn("_S_BY").."(v, i) ~ "..sx3..") - "..sx2..") % 256 ~ "..sx1..") end; local rs = "..vn("_T_CO").."(r); local t, val = "..vn("_S_SU").."(rs,1,1), "..vn("_S_SU").."(rs,2); if t == 's' then return val elseif t == 'n' then return "..vn("_GTON").."(val) elseif t == 'b' then return val == 't' else return nil end end\n"
     body = body .. "local function "..vn("_GFG").."(en_val) if "..vn("_L_VAULT").."['debug'] and "..vn("_L_VAULT").."['debug'].gethook() then "..vn("_GERR").."('trace detected') end; local dn = "..vn("_d").."(en_val); if dn == '_G' then return "..vn("_L_G").." end; if dn == '_ENV' then return "..vn("_L_ENV").." end; local on_en = "..vn("_GM_RAW").."[dn]; local on = on_en and "..vn("_d").."(on_en) or dn; local res = "..vn("_L_VAULT").."[on] or "..vn("_L_ENV").."[on]; if not res then "..vn("_GERR").."('GFG fail: ' .. "..vn("_GTOS").."(on)) end; return res end\n"
     body = body .. "local "..vn("_T_LIMIT").." = "..vn("_GCLK").."();\n"
     body = body .. "local function "..vn("_EXEC").."("..vn("_PR")..", ...)\n"
@@ -646,8 +649,6 @@ function Wrapper.generate(main, gm, sx)
         SWAP = "local a = "..si(SS).."; "..si(SS).." = "..si(SS.."-1").."; "..si(SS.."-1").." = a; "..D.." = 0x12345",
         JMP = vn("_P").." = "..ARG.."; "..D.." = 0x12345",
         JMP_IF_FALSE = "local v = "..si(SS).."; "..si(SS).." = nil; "..SS.." = "..SS.." - 1; if not v then "..vn("_P").." = "..ARG.." end; "..D.." = 0x12345",
-        GETVAR_G_CALL = "local a1, a2 = "..ARG.." % 4096, "..vn("_M_FL").."("..ARG.." / 4096); local n_as, n_re = a2 % 256, "..vn("_M_FL").."(a2 / 256); local f = "..GFG.."("..K.." [a1]); local as = {}; for i=1, n_as do as[n_as-i+1] = "..si(SS).."; "..si(SS).." = nil; "..SS.." = "..SS.." - 1 end; if not f then "..GERR.."('F_CALL: nil function') end; local re = {"..GPCL.."(f, "..GUPK.."(as, 1, n_as))}; if not re[1] then "..GERR.."(re[2]) end; if n_re == 255 then for i=2, #re do "..SS.." = "..SS.." + 1; "..si(SS).." = re[i] end else for i=1, n_re do "..SS.." = "..SS.." + 1; "..si(SS).." = re[i+1] end end; "..D.." = 0x12345",
-        LOADK_SETVAR = "local a1, a2 = "..ARG.." % 4096, "..vn("_M_FL").."("..ARG.." / 4096); "..V.."[a2] = "..d.."("..K.." [a1]); "..D.." = 0x12345",
         DEFER = "local f = "..d.."("..K.."["..ARG.."]); "..vn("_T_IN").."("..DEF..", function() "..vn("_EXEC").."(f) end); "..D.." = 0x12345"
     }
     local states = {}
@@ -688,8 +689,8 @@ end
 function Obfuscator.obfuscate(source)
     local lex = Lexer.new(source); local tokens = lex:tokenize(); local ast = Parser.new(tokens):parse()
     ast = Obfuscator.desugar(ast); ast = Obfuscator.applyMBA(ast);
-    local gm = Obfuscator.obfuscateIdentifiers(ast); local main, egm, sx = Virtualizer.virtualize(ast, gm)
-    return Wrapper.generate(main, egm, sx)
+    local gm = Obfuscator.obfuscateIdentifiers(ast); local main, egm, sxs = Virtualizer.virtualize(ast, gm)
+    return Wrapper.generate(main, egm, sxs)
 end
 
 if _G.arg and _G.arg[1] and _G.arg[2] then
