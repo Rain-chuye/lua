@@ -84,7 +84,7 @@ function Lexer:tokenize()
                     elseif esc:match("%d") then
                         local d = esc; while self:peek():match("%d") and #d < 3 do d = d .. self:consume() end
                         table.insert(res, string.char(tonumber(d)))
-                    else table.insert(res, esc) end
+                    else table.insert(res, nc) end
                 else table.insert(res, nc) end
             end
             self:consume(); table.insert(self.tokens, { type = "string", value = table.concat(res), line = self.line })
@@ -236,7 +236,10 @@ function Parser:parsePrimaryExpr()
             table.insert(vals, self:parseExpr()); while self:peek().value == "," do self:consume(); table.insert(vals, self:parseExpr()) end
         end; self:expect("]"); node = { type = "Table", values = vals, is_array = true }
     elseif tk.value == "lambda" then
-        self:consume(); local args = self:parseArgs(); local body; if self:peek().value == ":" then self:consume(); body = { type = "Block", body = { { type = "Return", values = { self:parseExpr() } } } }
+        self:consume(); local args = {}
+        if self:peek().value == "(" then args = self:parseArgs()
+        elseif self:peek().type == "name" then table.insert(args, self:consume().value) end
+        local body; if self:peek().value == ":" then self:consume(); body = { type = "Block", body = { { type = "Return", values = { self:parseExpr() } } } }
         else body = self:parseBlock(); self:expect("end") end; node = { type = "FunctionDef", args = args, body = body }
     elseif tk.value == "..." then self:consume(); node = { type = "Vararg" }
     elseif tk.type == "name" or tk.type == "keyword" then node = { type = "Var", name = self:consume().value }
@@ -533,23 +536,26 @@ function Virtualizer.virtualize(ast, gm)
             ids_to_op[id] = ops_to_idx[op]
             table.insert(ops[op], id)
         end
-        local b = {}; local rk = math.random(0, 255)
+        local b = {}; local rk = math.random(0, 255); local ck = math.random(0, 0xFFFFFF)
         for i, v in ipairs(p.b) do
             local op_id = ops[v.op][math.random(#ops[v.op])]
             local pck = op_id + (v.arg or 0) * 256
             if v.arg2 then pck = op_id + (v.arg % 4096) * 256 + (v.arg2 % 4096) * 1048576 end
-            table.insert(b, pck ~ ((rk + i) % 256))
+            local encrypted = pck ~ ((rk + i) % 256)
+            encrypted = (encrypted ~ (ck % 16777216))
+            ck = (ck * 13 + encrypted) % 16777216
+            table.insert(b, encrypted)
         end
         local em = { n = 255 }; for i = 0, 255 do em[i] = ids_to_op[i] end
         local k = { n = p.k.n }; for i = 1, p.k.n do local v = p.k[i]; if type(v) == "table" and v.b then k[i] = sp(v) else k[i] = encrypt_k(v) end end
         local cs = 0; for i=1, #b do cs = (cs + b[i]) % 1000000 end
-        return { b = b, k = k, m = em, sk = rk, cs = cs }
+        return { b = b, k = k, m = em, sk = rk, cs = cs, shk = math.random(0, 0xFFFFFF), ck = math.random(0, 0xFFFFFF) }
     end
     local egm = {}; for k, v in pairs(gm) do egm[k] = encrypt_k(v) end; return sp(main), egm, SX
 end
 
 local Wrapper = {}
-function Wrapper._sp(p, vn_func) return "{cs=" .. (p.cs or 0) .. ",b={" .. table.concat(p.b, ",") .. "},\nk=" .. Wrapper.sk(p.k, vn_func) .. ",\nm=" .. Wrapper.sk(p.m, vn_func) .. ",\nsk=" .. (p.sk or 0) .. "\n}" end
+function Wrapper._sp(p, vn_func) return "{cs=" .. (p.cs or 0) .. ",b={" .. table.concat(p.b, ",") .. "},\nk=" .. Wrapper.sk(p.k, vn_func) .. ",\nm=" .. Wrapper.sk(p.m, vn_func) .. ",\nsk=" .. (p.sk or 0) .. ",\nshk=" .. p.shk .. "\n,ck=" .. (p.ck or 0) .. "}" end
 function Wrapper.sk(ks, vn)
     local s = "{"; local n = ks.n or 0; if n == 0 then for k, v in pairs(ks) do if type(k) == "number" and k > n then n = k end end end
     for i=0, n do local v = ks[i]
@@ -564,13 +570,13 @@ function Wrapper.generate(main, gm, sx)
     local vmap = {}
     local function vn(n) if not vmap[n] then vmap[n] = string.format("_0x%X", math.random(0x100000, 0x999999)) end; return vmap[n] end
     local state_map = {}
-    local ops_list = { "DEFER", "LOADK", "GETVAR", "SETVAR", "GETVAR_G", "SETVAR_G", "GETTABLE", "SETTABLE", "NEWTABLE", "CALL", "RET", "ADD", "SUB", "MUL", "DIV", "IDIV", "MOD", "POW", "BAND", "BOR", "BXOR", "SHL", "SHR", "EQ", "LT", "LE", "CONCAT", "NOT", "UNM", "BNOT", "LEN", "CLOSURE", "LOAD_VA", "LOAD_VARARG", "PICK_RESULT", "POP", "DUP", "SWAP", "JMP", "JMP_IF_FALSE", "GETVAR_G_CALL", "LOADK_SETVAR" }
-    for i, op in ipairs(ops_list) do state_map[i] = math.random(0x1000, 0x999999) end
+    for i = 1, #ops_list do state_map[i] = math.random(0x1000, 0x999999) end
     local function sm(t)
         local s = "{"; for k, v in pairs(t) do
             s = s .. "[\"" .. k .. "\"]=\"" .. v:gsub(".", function(c) return "\\" .. string.format("%03d", c:byte()) end) .. "\","
         end; return s .. "}"
     end
+    local function oq(v) return "(" .. (v - 100) .. " + 100)" end
     local body = "return (function(...)\n"
     body = body .. "local "..vn("_L_ENV").." = _ENV or _G; local "..vn("_L_G").." = _G; local "..vn("_L_VAULT").." = {};\n"
     body = body .. "local "..vn("_GTY")..", "..vn("_GIP")..", "..vn("_GERR")..", "..vn("_GTON")..", "..vn("_GTOS")..", "..vn("_GPCL")..", "..vn("_GUPK")..", "..vn("_GPAI")..", "..vn("_GSEL")..", "..vn("_GCLK").." = type, ipairs, error, tonumber, tostring, pcall, (table and table.unpack or unpack), pairs, select, os.clock\n"
@@ -586,64 +592,96 @@ function Wrapper.generate(main, gm, sx)
     body = body .. "local function "..vn("_GFG").."(en_val) if "..vn("_L_VAULT").."['debug'] and "..vn("_L_VAULT").."['debug'].gethook() then "..vn("_GERR").."('trace detected') end; local dn = "..vn("_d").."(en_val); if dn == '_G' then return "..vn("_L_G").." end; if dn == '_ENV' then return "..vn("_L_ENV").." end; local on_en = "..vn("_GM_RAW").."[dn]; local on = on_en and "..vn("_d").."(on_en) or dn; local res = "..vn("_L_VAULT").."[on] or "..vn("_L_ENV").."[on]; if not res then "..vn("_GERR").."('GFG fail: ' .. "..vn("_GTOS").."(on)) end; return res end\n"
     body = body .. "local "..vn("_T_LIMIT").." = "..vn("_GCLK").."();\n"
     body = body .. "local function "..vn("_EXEC").."("..vn("_PR")..", ...)\n"
-    body = body .. "  local "..vn("_S")..", "..vn("_SS")..", "..vn("_P")..", "..vn("_K")..", "..vn("_V")..", "..vn("_RK")..", "..vn("_DEF").." = {}, 0, 1, "..vn("_PR")..".k, {}, "..vn("_PR")..".sk, {}\n"
+    body = body .. "  local "..vn("_S")..", "..vn("_SS")..", "..vn("_P")..", "..vn("_K")..", "..vn("_V")..", "..vn("_RK")..", "..vn("_DEF")..", "..vn("_SHK")..", "..vn("_CK").." = {}, 0, 1, "..vn("_PR")..".k, {}, "..vn("_PR")..".sk, {}, "..vn("_PR")..".shk, "..vn("_PR")..".ck or 0\n"
     body = body .. "  local "..vn("_CS").." = 0; for i=1, #"..vn("_PR")..".b do "..vn("_CS").." = ("..vn("_CS").." + "..vn("_PR")..".b[i]) % 1000000 end; if "..vn("_CS").." ~= "..vn("_PR")..".cs then "..vn("_GERR").."('integrity check failed') end\n"
     body = body .. "  local "..vn("_D")..", "..vn("_ARG").." = 0x12345, 0; while "..vn("_D").." ~= 0 do\n"
     body = body .. "    if "..vn("_D").." == 0x12345 then\n"
     body = body .. "      if "..vn("_GCLK").."() - "..vn("_T_LIMIT").." > 30 then "..vn("_GERR").."('timeout') end\n"
     body = body .. "      if "..vn("_P").." > #"..vn("_PR")..".b then "..vn("_D").." = 0; break end\n"
-    body = body .. "      local _EPCK = "..vn("_PR")..".b["..vn("_P").."]; local _PCK = _EPCK ~ (("..vn("_RK").." + "..vn("_P")..") % 256); "..vn("_P").." = "..vn("_P").." + 1; local _OPI = _PCK % 256; "..vn("_ARG").." = "..vn("_M_FL").."(_PCK / 256); local _OI = "..vn("_PR")..".m[_OPI]\n"
+    body = body .. "      local _EPCK = "..vn("_PR")..".b["..vn("_P").."];\n"
+    body = body .. "      local _PCK = (_EPCK ~ ("..vn("_CK").." % 16777216)) ~ (("..vn("_RK").." + "..vn("_P")..") % 256);\n"
+    body = body .. "      "..vn("_CK").." = ("..vn("_CK").." * 13 + _EPCK) % 16777216;\n"
+    body = body .. "      "..vn("_P").." = "..vn("_P").." + 1; local _OPI = _PCK % 256; "..vn("_ARG").." = "..vn("_M_FL").."(_PCK / 256); local _OI = "..vn("_PR")..".m[_OPI]\n"
+
+    local function si(idx) return vn("_S").."[" .. idx .. " ~ "..vn("_SHK").."]" end
+    local S, SS, ARG, K, V, D, GFG, d, GTY, GERR, GPCL, GUPK, DEF, GGM, GSM, GSEL, L_ENV = vn("_S"), vn("_SS"), vn("_ARG"), vn("_K"), vn("_V"), vn("_D"), vn("_GFG"), vn("_d"), vn("_GTY"), vn("_GERR"), vn("_GPCL"), vn("_GUPK"), vn("_DEF"), vn("_GGM"), vn("_GSM"), vn("_GSEL"), vn("_L_ENV")
+
     local handlers = {
-        LOADK = vn("_SS").." = "..vn("_SS").." + 1; "..vn("_S").."["..vn("_SS").."] = "..vn("_d").."("..vn("_K").."["..vn("_ARG").."]); "..vn("_D").." = 0x12345",
-        GETVAR = vn("_SS").." = "..vn("_SS").." + 1; "..vn("_S").."["..vn("_SS").."] = "..vn("_V").."["..vn("_ARG").."]; "..vn("_D").." = 0x12345",
-        SETVAR = vn("_V").."["..vn("_ARG").."] = "..vn("_S").."["..vn("_SS").."]; "..vn("_S").."["..vn("_SS").."] = nil; "..vn("_SS").." = "..vn("_SS").." - 1; "..vn("_D").." = 0x12345",
-        GETVAR_G = vn("_SS").." = "..vn("_SS").." + 1; "..vn("_S").."["..vn("_SS").."] = "..vn("_GFG").."("..vn("_K").."["..vn("_ARG").."]); "..vn("_D").." = 0x12345",
-        SETVAR_G = vn("_L_ENV").."["..vn("_d").."("..vn("_K").."["..vn("_ARG").."])] = "..vn("_S").."["..vn("_SS").."]; "..vn("_S").."["..vn("_SS").."] = nil; "..vn("_SS").." = "..vn("_SS").." - 1; "..vn("_D").." = 0x12345",
-        GETTABLE = "local k = "..vn("_S").."["..vn("_SS").."]; "..vn("_S").."["..vn("_SS").."] = nil; "..vn("_SS").." = "..vn("_SS").." - 1; local t = "..vn("_S").."["..vn("_SS").."]; "..vn("_S").."["..vn("_SS").."] = t[k]; "..vn("_D").." = 0x12345",
-        SETTABLE = "local v = "..vn("_S").."["..vn("_SS").."]; "..vn("_S").."["..vn("_SS").."] = nil; "..vn("_SS").." = "..vn("_SS").." - 1; local k = "..vn("_S").."["..vn("_SS").."]; "..vn("_S").."["..vn("_SS").."] = nil; "..vn("_SS").." = "..vn("_SS").." - 1; local t = "..vn("_S").."["..vn("_SS").."]; "..vn("_S").."["..vn("_SS").."] = nil; "..vn("_SS").." = "..vn("_SS").." - 1; t[k] = v; "..vn("_D").." = 0x12345",
-        NEWTABLE = vn("_SS").." = "..vn("_SS").." + 1; "..vn("_S").."["..vn("_SS").."] = {}; "..vn("_D").." = 0x12345",
-        CALL = "local n_as, n_re = "..vn("_ARG").." % 256, "..vn("_M_FL").."("..vn("_ARG").." / 256); local as = {}; for i=1, n_as do as[n_as-i+1] = "..vn("_S").."["..vn("_SS").."]; "..vn("_S").."["..vn("_SS").."] = nil; "..vn("_SS").." = "..vn("_SS").." - 1 end; local f = "..vn("_S").."["..vn("_SS").."]; "..vn("_S").."["..vn("_SS").."] = nil; "..vn("_SS").." = "..vn("_SS").." - 1; if not f then "..vn("_GERR").."('CALL: nil function') end; local re = {"..vn("_GPCL").."(f, "..vn("_GUPK").."(as, 1, n_as))}; if not re[1] then "..vn("_GERR").."(re[2]) end; if n_re == 255 then for i=2, #re do "..vn("_SS").." = "..vn("_SS").." + 1; "..vn("_S").."["..vn("_SS").."] = re[i] end else for i=1, n_re do "..vn("_SS").." = "..vn("_SS").." + 1; "..vn("_S").."["..vn("_SS").."] = re[i+1] end end; "..vn("_D").." = 0x12345",
-        RET = "local re = {}; for i=1, "..vn("_ARG").." do re["..vn("_ARG").."-i+1] = "..vn("_S").."["..vn("_SS").."]; "..vn("_S").."["..vn("_SS").."] = nil; "..vn("_SS").." = "..vn("_SS").." - 1 end; for i=#"..vn("_DEF")..",1,-1 do "..vn("_DEF").."[i]() end; return "..vn("_GUPK").."(re)",
-        ADD = "local r = "..vn("_S").."["..vn("_SS").."]; "..vn("_S").."["..vn("_SS").."] = nil; "..vn("_SS").." = "..vn("_SS").." - 1; local l = "..vn("_S").."["..vn("_SS").."]; if "..vn("_GTY").."(l) == 'number' and "..vn("_GTY").."(r) == 'number' and l % 1 == 0 and r % 1 == 0 then "..vn("_S").."["..vn("_SS").."] = (l ~ r) + 2 * (l & r) else "..vn("_S").."["..vn("_SS").."] = l + r end; "..vn("_D").." = 0x12345",
-        SUB = "local r = "..vn("_S").."["..vn("_SS").."]; "..vn("_S").."["..vn("_SS").."] = nil; "..vn("_SS").." = "..vn("_SS").." - 1; local l = "..vn("_S").."["..vn("_SS").."]; if "..vn("_GTY").."(l) == 'number' and "..vn("_GTY").."(r) == 'number' and l % 1 == 0 and r % 1 == 0 then "..vn("_S").."["..vn("_SS").."] = (l + (~r)) + 1 else "..vn("_S").."["..vn("_SS").."] = l - r end; "..vn("_D").." = 0x12345",
-        MUL = "local r = "..vn("_S").."["..vn("_SS").."]; "..vn("_S").."["..vn("_SS").."] = nil; "..vn("_SS").." = "..vn("_SS").." - 1; local l = "..vn("_S").."["..vn("_SS").."]; "..vn("_S").."["..vn("_SS").."] = l * r; "..vn("_D").." = 0x12345",
-        DIV = "local r = "..vn("_S").."["..vn("_SS").."]; "..vn("_S").."["..vn("_SS").."] = nil; "..vn("_SS").." = "..vn("_SS").." - 1; local l = "..vn("_S").."["..vn("_SS").."]; "..vn("_S").."["..vn("_SS").."] = l / r; "..vn("_D").." = 0x12345",
-        POW = "local r = "..vn("_S").."["..vn("_SS").."]; "..vn("_S").."["..vn("_SS").."] = nil; "..vn("_SS").." = "..vn("_SS").." - 1; local l = "..vn("_S").."["..vn("_SS").."]; "..vn("_S").."["..vn("_SS").."] = l ^ r; "..vn("_D").." = 0x12345",
-        IDIV = "local r = "..vn("_S").."["..vn("_SS").."]; "..vn("_S").."["..vn("_SS").."] = nil; "..vn("_SS").." = "..vn("_SS").." - 1; local l = "..vn("_S").."["..vn("_SS").."]; "..vn("_S").."["..vn("_SS").."] = l // r; "..vn("_D").." = 0x12345",
-        MOD = "local r = "..vn("_S").."["..vn("_SS").."]; "..vn("_S").."["..vn("_SS").."] = nil; "..vn("_SS").." = "..vn("_SS").." - 1; local l = "..vn("_S").."["..vn("_SS").."]; "..vn("_S").."["..vn("_SS").."] = l % r; "..vn("_D").." = 0x12345",
-        BAND = "local r = "..vn("_S").."["..vn("_SS").."]; "..vn("_S").."["..vn("_SS").."] = nil; "..vn("_SS").." = "..vn("_SS").." - 1; local l = "..vn("_S").."["..vn("_SS").."]; "..vn("_S").."["..vn("_SS").."] = l & r; "..vn("_D").." = 0x12345",
-        BOR = "local r = "..vn("_S").."["..vn("_SS").."]; "..vn("_S").."["..vn("_SS").."] = nil; "..vn("_SS").." = "..vn("_SS").." - 1; local l = "..vn("_S").."["..vn("_SS").."]; "..vn("_S").."["..vn("_SS").."] = l | r; "..vn("_D").." = 0x12345",
-        BXOR = "local r = "..vn("_S").."["..vn("_SS").."]; "..vn("_S").."["..vn("_SS").."] = nil; "..vn("_SS").." = "..vn("_SS").." - 1; local l = "..vn("_S").."["..vn("_SS").."]; "..vn("_S").."["..vn("_SS").."] = l ~ r; "..vn("_D").." = 0x12345",
-        SHL = "local r = "..vn("_S").."["..vn("_SS").."]; "..vn("_S").."["..vn("_SS").."] = nil; "..vn("_SS").." = "..vn("_SS").." - 1; local l = "..vn("_S").."["..vn("_SS").."]; "..vn("_S").."["..vn("_SS").."] = l << r; "..vn("_D").." = 0x12345",
-        SHR = "local r = "..vn("_S").."["..vn("_SS").."]; "..vn("_S").."["..vn("_SS").."] = nil; "..vn("_SS").." = "..vn("_SS").." - 1; local l = "..vn("_S").."["..vn("_SS").."]; "..vn("_S").."["..vn("_SS").."] = l >> r; "..vn("_D").." = 0x12345",
-        EQ = "local r = "..vn("_S").."["..vn("_SS").."]; "..vn("_S").."["..vn("_SS").."] = nil; "..vn("_SS").." = "..vn("_SS").." - 1; local l = "..vn("_S").."["..vn("_SS").."]; "..vn("_S").."["..vn("_SS").."] = l == r; "..vn("_D").." = 0x12345",
-        LT = "local r = "..vn("_S").."["..vn("_SS").."]; "..vn("_S").."["..vn("_SS").."] = nil; "..vn("_SS").." = "..vn("_SS").." - 1; local l = "..vn("_S").."["..vn("_SS").."]; "..vn("_S").."["..vn("_SS").."] = l < r; "..vn("_D").." = 0x12345",
-        LE = "local r = "..vn("_S").."["..vn("_SS").."]; "..vn("_S").."["..vn("_SS").."] = nil; "..vn("_SS").." = "..vn("_SS").." - 1; local l = "..vn("_S").."["..vn("_SS").."]; "..vn("_S").."["..vn("_SS").."] = l <= r; "..vn("_D").." = 0x12345",
-        CONCAT = "local r = "..vn("_S").."["..vn("_SS").."]; "..vn("_S").."["..vn("_SS").."] = nil; "..vn("_SS").." = "..vn("_SS").." - 1; local l = "..vn("_S").."["..vn("_SS").."]; "..vn("_S").."["..vn("_SS").."] = l .. r; "..vn("_D").." = 0x12345",
-        NOT = vn("_S").."["..vn("_SS").."] = not "..vn("_S").."["..vn("_SS").."]; "..vn("_D").." = 0x12345",
-        UNM = vn("_S").."["..vn("_SS").."] = -"..vn("_S").."["..vn("_SS").."]; "..vn("_D").." = 0x12345",
-        BNOT = vn("_S").."["..vn("_SS").."] = ~"..vn("_S").."["..vn("_SS").."]; "..vn("_D").." = 0x12345",
-        LEN = vn("_S").."["..vn("_SS").."] = #"..vn("_S").."["..vn("_SS").."]; "..vn("_D").." = 0x12345",
-        CLOSURE = "local pr = "..vn("_K").."["..vn("_ARG").."]; "..vn("_SS").." = "..vn("_SS").." + 1; "..vn("_S").."["..vn("_SS").."] = function(...) return "..vn("_EXEC").."(pr, ...) end; "..vn("_D").." = 0x12345",
-        LOAD_VA = vn("_SS").." = "..vn("_SS").." + 1; "..vn("_S").."["..vn("_SS").."] = ("..vn("_GSEL").."("..vn("_ARG")..", ...)); "..vn("_D").." = 0x12345",
-        LOAD_VARARG = "local va = {...}; for i=1, #va do "..vn("_SS").." = "..vn("_SS").." + 1; "..vn("_S").."["..vn("_SS").."] = va[i] end; "..vn("_D").." = 0x12345",
-        PICK_RESULT = "-- not implemented; "..vn("_D").." = 0x12345",
-        POP = "for i=1, "..vn("_ARG").." do "..vn("_S").."["..vn("_SS").."] = nil; "..vn("_SS").." = "..vn("_SS").." - 1 end; "..vn("_D").." = 0x12345",
-        DUP = vn("_SS").." = "..vn("_SS").." + 1; "..vn("_S").."["..vn("_SS").."] = "..vn("_S").."["..vn("_SS").." - "..vn("_ARG").." - 1]; "..vn("_D").." = 0x12345",
-        SWAP = "local a = "..vn("_S").."["..vn("_SS").."]; "..vn("_S").."["..vn("_SS").."] = "..vn("_S").."["..vn("_SS").."-1]; "..vn("_S").."["..vn("_SS").."-1] = a; "..vn("_D").." = 0x12345",
-        JMP = vn("_P").." = "..vn("_ARG").."; "..vn("_D").." = 0x12345",
-        JMP_IF_FALSE = "local v = "..vn("_S").."["..vn("_SS").."]; "..vn("_S").."["..vn("_SS").."] = nil; "..vn("_SS").." = "..vn("_SS").." - 1; if not v then "..vn("_P").." = "..vn("_ARG").." end; "..vn("_D").." = 0x12345",
-        GETVAR_G_CALL = "local a1, a2 = "..vn("_ARG").." % 4096, "..vn("_M_FL").."("..vn("_ARG").." / 4096); local f = "..vn("_GFG").."("..vn("_K").." [a1]); local as = {}; for i=1, a2 do as[a2-i+1] = "..vn("_S").."["..vn("_SS").."]; "..vn("_S").."["..vn("_SS").."] = nil; "..vn("_SS").." = "..vn("_SS").." - 1 end; if not f then "..vn("_GERR").."('F_CALL: nil function') end; local re = {"..vn("_GPCL").."(f, "..vn("_GUPK").."(as, 1, a2))}; if not re[1] then "..vn("_GERR").."(re[2]) end; for i=2, #re do "..vn("_SS").." = "..vn("_SS").." + 1; "..vn("_S").."["..vn("_SS").."] = re[i] end; "..vn("_D").." = 0x12345",
-        LOADK_SETVAR = "local a1, a2 = "..vn("_ARG").." % 4096, "..vn("_M_FL").."("..vn("_ARG").." / 4096); "..vn("_V").."[a2] = "..vn("_d").."("..vn("_K").." [a1]); "..vn("_D").." = 0x12345",
-        DEFER = "local f = "..vn("_d").."("..vn("_K").."["..vn("_ARG").."]); "..vn("_T_IN").."("..vn("_DEF")..", function() "..vn("_EXEC").."(f) end); "..vn("_D").." = 0x12345"
+        LOADK = SS.." = "..SS.." + 1; "..si(SS).." = "..d.."("..K.."["..ARG.."]); "..D.." = 0x12345",
+        GETVAR = SS.." = "..SS.." + 1; "..si(SS).." = "..V.."["..ARG.."]; "..D.." = 0x12345",
+        SETVAR = V.."["..ARG.."] = "..si(SS).."; "..si(SS).." = nil; "..SS.." = "..SS.." - 1; "..D.." = 0x12345",
+        GETVAR_G = SS.." = "..SS.." + 1; "..si(SS).." = "..GFG.."("..K.."["..ARG.."]); "..D.." = 0x12345",
+        SETVAR_G = L_ENV.."["..d.."("..K.."["..ARG.."])] = "..si(SS).."; "..si(SS).." = nil; "..SS.." = "..SS.." - 1; "..D.." = 0x12345",
+        GETTABLE = "local k = "..si(SS).."; "..si(SS).." = nil; "..SS.." = "..SS.." - 1; local t = "..si(SS).."; "..si(SS).." = t[k]; "..D.." = 0x12345",
+        SETTABLE = "local v = "..si(SS).."; "..si(SS).." = nil; "..SS.." = "..SS.." - 1; local k = "..si(SS).."; "..si(SS).." = nil; "..SS.." = "..SS.." - 1; local t = "..si(SS).."; "..si(SS).." = nil; "..SS.." = "..SS.." - 1; t[k] = v; "..D.." = 0x12345",
+        NEWTABLE = SS.." = "..SS.." + 1; "..si(SS).." = {}; "..D.." = 0x12345",
+        CALL = "local n_as, n_re = "..ARG.." % 256, "..vn("_M_FL").."("..ARG.." / 256); local as = {}; for i=1, n_as do as[n_as-i+1] = "..si(SS).."; "..si(SS).." = nil; "..SS.." = "..SS.." - 1 end; local f = "..si(SS).."; "..si(SS).." = nil; "..SS.." = "..SS.." - 1; if not f then "..GERR.."('CALL: nil function') end; local re = {"..GPCL.."(f, "..GUPK.."(as, 1, n_as))}; if not re[1] then "..GERR.."(re[2]) end; if n_re == 255 then for i=2, #re do "..SS.." = "..SS.." + 1; "..si(SS).." = re[i] end else for i=1, n_re do "..SS.." = "..SS.." + 1; "..si(SS).." = re[i+1] end end; "..D.." = 0x12345",
+        RET = "local re = {}; for i=1, "..ARG.." do re["..ARG.."-i+1] = "..si(SS).."; "..si(SS).." = nil; "..SS.." = "..SS.." - 1 end; for i=#"..DEF..",1,-1 do "..DEF.."[i]() end; return "..GUPK.."(re)",
+        ADD = "local r = "..si(SS).."; "..si(SS).." = nil; "..SS.." = "..SS.." - 1; local l = "..si(SS).."; if "..GTY.."(l) == 'number' and "..GTY.."(r) == 'number' and l % 1 == 0 and r % 1 == 0 then "..si(SS).." = (l ~ r) + 2 * (l & r) else "..si(SS).." = l + r end; "..D.." = 0x12345",
+        SUB = "local r = "..si(SS).."; "..si(SS).." = nil; "..SS.." = "..SS.." - 1; local l = "..si(SS).."; if "..GTY.."(l) == 'number' and "..GTY.."(r) == 'number' and l % 1 == 0 and r % 1 == 0 then "..si(SS).." = (l + (~r)) + 1 else "..si(SS).." = l - r end; "..D.." = 0x12345",
+        MUL = "local r = "..si(SS).."; "..si(SS).." = nil; "..SS.." = "..SS.." - 1; local l = "..si(SS).."; "..si(SS).." = l * r; "..D.." = 0x12345",
+        DIV = "local r = "..si(SS).."; "..si(SS).." = nil; "..SS.." = "..SS.." - 1; local l = "..si(SS).."; "..si(SS).." = l / r; "..D.." = 0x12345",
+        POW = "local r = "..si(SS).."; "..si(SS).." = nil; "..SS.." = "..SS.." - 1; local l = "..si(SS).."; "..si(SS).." = l ^ r; "..D.." = 0x12345",
+        IDIV = "local r = "..si(SS).."; "..si(SS).." = nil; "..SS.." = "..SS.." - 1; local l = "..si(SS).."; "..si(SS).." = l // r; "..D.." = 0x12345",
+        MOD = "local r = "..si(SS).."; "..si(SS).." = nil; "..SS.." = "..SS.." - 1; local l = "..si(SS).."; "..si(SS).." = l % r; "..D.." = 0x12345",
+        BAND = "local r = "..si(SS).."; "..si(SS).." = nil; "..SS.." = "..SS.." - 1; local l = "..si(SS).."; "..si(SS).." = l & r; "..D.." = 0x12345",
+        BOR = "local r = "..si(SS).."; "..si(SS).." = nil; "..SS.." = "..SS.." - 1; local l = "..si(SS).."; "..si(SS).." = l | r; "..D.." = 0x12345",
+        BXOR = "local r = "..si(SS).."; "..si(SS).." = nil; "..SS.." = "..SS.." - 1; local l = "..si(SS).."; "..si(SS).." = l ~ r; "..D.." = 0x12345",
+        SHL = "local r = "..si(SS).."; "..si(SS).." = nil; "..SS.." = "..SS.." - 1; local l = "..si(SS).."; "..si(SS).." = l << r; "..D.." = 0x12345",
+        SHR = "local r = "..si(SS).."; "..si(SS).." = nil; "..SS.." = "..SS.." - 1; local l = "..si(SS).."; "..si(SS).." = l >> r; "..D.." = 0x12345",
+        EQ = "local r = "..si(SS).."; "..si(SS).." = nil; "..SS.." = "..SS.." - 1; local l = "..si(SS).."; "..si(SS).." = l == r; "..D.." = 0x12345",
+        LT = "local r = "..si(SS).."; "..si(SS).." = nil; "..SS.." = "..SS.." - 1; local l = "..si(SS).."; "..si(SS).." = l < r; "..D.." = 0x12345",
+        LE = "local r = "..si(SS).."; "..si(SS).." = nil; "..SS.." = "..SS.." - 1; local l = "..si(SS).."; "..si(SS).." = l <= r; "..D.." = 0x12345",
+        CONCAT = "local r = "..si(SS).."; "..si(SS).." = nil; "..SS.." = "..SS.." - 1; local l = "..si(SS).."; "..si(SS).." = l .. r; "..D.." = 0x12345",
+        NOT = si(SS).." = not "..si(SS).."; "..D.." = 0x12345",
+        UNM = si(SS).." = -"..si(SS).."; "..D.." = 0x12345",
+        BNOT = si(SS).." = ~"..si(SS).."; "..D.." = 0x12345",
+        LEN = si(SS).." = #"..si(SS).."; "..D.." = 0x12345",
+        CLOSURE = "local pr = "..K.."["..ARG.."]; "..SS.." = "..SS.." + 1; "..si(SS).." = function(...) return "..vn("_EXEC").."(pr, ...) end; "..D.." = 0x12345",
+        LOAD_VA = SS.." = "..SS.." + 1; "..si(SS).." = ("..GSEL.."("..ARG..", ...)); "..D.." = 0x12345",
+        LOAD_VARARG = "local va = {...}; for i=1, #va do "..SS.." = "..SS.." + 1; "..si(SS).." = va[i] end; "..D.." = 0x12345",
+        PICK_RESULT = "-- not implemented; "..D.." = 0x12345",
+        POP = "for i=1, "..ARG.." do "..si(SS).." = nil; "..SS.." = "..SS.." - 1 end; "..D.." = 0x12345",
+        DUP = "local val = "..si(SS.." - "..ARG).."; "..SS.." = "..SS.." + 1; "..si(SS).." = val; "..D.." = 0x12345",
+        SWAP = "local a = "..si(SS).."; "..si(SS).." = "..si(SS.."-1").."; "..si(SS.."-1").." = a; "..D.." = 0x12345",
+        JMP = vn("_P").." = "..ARG.."; "..D.." = 0x12345",
+        JMP_IF_FALSE = "local v = "..si(SS).."; "..si(SS).." = nil; "..SS.." = "..SS.." - 1; if not v then "..vn("_P").." = "..ARG.." end; "..D.." = 0x12345",
+        GETVAR_G_CALL = "local a1, a2 = "..ARG.." % 4096, "..vn("_M_FL").."("..ARG.." / 4096); local n_as, n_re = a2 % 256, "..vn("_M_FL").."(a2 / 256); local f = "..GFG.."("..K.." [a1]); local as = {}; for i=1, n_as do as[n_as-i+1] = "..si(SS).."; "..si(SS).." = nil; "..SS.." = "..SS.." - 1 end; if not f then "..GERR.."('F_CALL: nil function') end; local re = {"..GPCL.."(f, "..GUPK.."(as, 1, n_as))}; if not re[1] then "..GERR.."(re[2]) end; if n_re == 255 then for i=2, #re do "..SS.." = "..SS.." + 1; "..si(SS).." = re[i] end else for i=1, n_re do "..SS.." = "..SS.." + 1; "..si(SS).." = re[i+1] end end; "..D.." = 0x12345",
+        LOADK_SETVAR = "local a1, a2 = "..ARG.." % 4096, "..vn("_M_FL").."("..ARG.." / 4096); "..V.."[a2] = "..d.."("..K.." [a1]); "..D.." = 0x12345",
+        DEFER = "local f = "..d.."("..K.."["..ARG.."]); "..vn("_T_IN").."("..DEF..", function() "..vn("_EXEC").."(f) end); "..D.." = 0x12345"
     }
     local states = {}
     for op_idx, state in pairs(state_map) do table.insert(states, {idx=op_idx, state=state}) end
     for i = #states, 2, -1 do local j = math.random(i); states[i], states[j] = states[j], states[i] end
-    for _, s in ipairs(states) do body = body .. "      if _OI == "..s.idx.." then "..vn("_D").." = "..s.state.." end\n" end
+
+    -- Multi-Tier Partitioning
+    local function partition(list, depth)
+        if #list <= 3 or depth > 2 then
+            local s = ""
+            for i, item in ipairs(list) do
+                s = s .. (i == 1 and "    if " or "    elseif ") .. D .. " == " .. oq(item.state) .. " then\n"
+                s = s .. "      " .. handlers[ops_list[item.idx]]:gsub("0x12345", oq(0x12345)) .. "\n"
+            end
+            return s .. "    end\n"
+        end
+        local mid = math.floor(#list / 2)
+        local left = {}; for i=1, mid do table.insert(left, list[i]) end
+        local right = {}; for i=mid+1, #list do table.insert(right, list[i]) end
+        local pivot = list[mid].state
+        local s = "    if " .. D .. " <= " .. pivot .. " then\n"
+        s = s .. partition(left, depth + 1)
+        s = s .. "    else\n"
+        s = s .. partition(right, depth + 1)
+        s = s .. "    end\n"
+        return s
+    end
+
+    table.sort(states, function(a, b) return a.state < b.state end)
+
+    for _, s in ipairs(states) do body = body .. "      if _OI == "..s.idx.." then "..D.." = "..oq(s.state).." end\n" end
     body = body .. "    end\n"
-    for i, s in ipairs(states) do body = body .. (i == 1 and "    if " or "    elseif ") ..vn("_D").." == "..s.state.." then\n" .. "      " .. handlers[ops_list[s.idx]] .. "\n" end
-    body = body .. "    end\n  end\nend\nreturn "..vn("_EXEC").."(" .. Wrapper._sp(main, vn) .. ", ...)\nend)(...)"
+    body = body .. partition(states, 0)
+    body = body .. "  end\n\n  for _i=1, #"..DEF.." do "..DEF.."[_i]() end\nend\nreturn "..vn("_EXEC").."(" .. Wrapper._sp(main, vn) .. ", ...)\nend)(...)"
     return body
 end
 
