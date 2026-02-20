@@ -1,5 +1,5 @@
 math.randomseed(math.floor(os.time() + os.clock()))
-local ops_list = { "DEFER", "LOADK", "GETVAR", "SETVAR", "GETVAR_G", "SETVAR_G", "GETTABLE", "SETTABLE", "NEWTABLE", "CALL", "RET", "ADD", "SUB", "MUL", "DIV", "IDIV", "MOD", "POW", "BAND", "BOR", "BXOR", "SHL", "SHR", "EQ", "LT", "LE", "CONCAT", "NOT", "UNM", "BNOT", "LEN", "CLOSURE", "LOAD_VA", "LOAD_VARARG", "PICK_RESULT", "POP", "DUP", "SWAP", "JMP", "JMP_IF_FALSE" }
+local ops_list = { "DEFER", "LOADK", "GETVAR", "SETVAR", "GETVAR_G", "SETVAR_G", "GETTABLE", "SETTABLE", "NEWTABLE", "CALL", "RET", "ADD", "SUB", "MUL", "DIV", "IDIV", "MOD", "POW", "BAND", "BOR", "BXOR", "SHL", "SHR", "EQ", "LT", "LE", "CONCAT", "NOT", "UNM", "BNOT", "LEN", "CLOSURE", "LOAD_VA", "LOAD_VARARG", "PICK_RESULT", "POP", "DUP", "SWAP", "JMP", "JMP_IF_FALSE", "GETVAR_G_CALL", "LOADK_SETVAR" }
 
 local Lexer = {}
 function Lexer.new(source) return setmetatable({ source = source, pos = 1, tokens = {}, line = 1 }, { __index = Lexer }) end
@@ -201,18 +201,18 @@ function Parser:parseArgs()
     self:expect(")"); return args
 end
 function Parser:parseExpr() return self:parseOr() end
-function Parser:parseOr() local node = self:parseAnd(); while self:peek().value == "or" do local op = self:consume().value; node = { type = "BinaryOp", op = op, left = node, right = self:parseAnd() } end; return node end
-function Parser:parseAnd() local node = self:parseCompare(); while self:peek().value == "and" do local op = self:consume().value; node = { type = "BinaryOp", op = op, left = node, right = self:parseCompare() } end; return node end
-function Parser:parseCompare() local node = self:parseBitOr(); local ops = { ["=="]=1, ["~="]=1, ["<"]=1, [">"]=1, ["<="]=1, [">="]=1 }; while ops[self:peek().value] do local op = self:consume().value; node = { type = "BinaryOp", op = op, left = node, right = self:parseBitOr() } end; return node end
-function Parser:parseBitOr() local node = self:parseBitXor(); while self:peek().value == "|" do local op = self:consume().value; node = { type = "BinaryOp", op = op, left = node, right = self:parseBitXor() } end; return node end
-function Parser:parseBitXor() local node = self:parseBitAnd(); while self:peek().value == "~" do local op = self:consume().value; node = { type = "BinaryOp", op = op, left = node, right = self:parseBitAnd() } end; return node end
-function Parser:parseBitAnd() local node = self:parseBitShift(); while self:peek().value == "&" do local op = self:consume().value; node = { type = "BinaryOp", op = op, left = node, right = self:parseBitShift() } end; return node end
-function Parser:parseBitShift() local node = self:parseConcat(); while self:peek().value == "<<" or self:peek().value == ">>" do local op = self:consume().value; node = { type = "BinaryOp", op = op, left = node, right = self:parseConcat() } end; return node end
-function Parser:parseConcat() local node = self:parseAdd(); if self:peek().value == ".." then local op = self:consume().value; node = { type = "BinaryOp", op = op, left = node, right = self:parseConcat() } end; return node end
-function Parser:parseAdd() local node = self:parseMul(); while self:peek().value == "+" or self:peek().value == "-" do local op = self:consume().value; node = { type = "BinaryOp", op = op, left = node, right = self:parseMul() } end; return node end
-function Parser:parseMul() local node = self:parseUnary(); local ops = { ["*"]=1, ["/"]=1, ["//"]=1, ["%"]=1 }; while ops[self:peek().value] do local op = self:consume().value; node = { type = "BinaryOp", op = op, left = node, right = self:parseUnary() } end; return node end
-function Parser:parseUnary() local ops = { ["not"]="not", ["-"]="-", ["~"]="~", ["#"]="#" }; if ops[self:peek().value] then local op = self:consume().value; return { type = "UnaryOp", op = op, right = self:parseUnary() } end; return self:parsePow() end
-function Parser:parsePow() local node = self:parsePrimaryExpr(); if self:peek().value == "^" then local op = self:consume().value; node = { type = "BinaryOp", op = op, left = node, right = self:parsePow() } end; return node end
+function Parser:parseOr() local node = self:parseAnd(); while self:peek().value == "or" do local_op = self:consume().value; node = { type = "BinaryOp", op = local_op, left = node, right = self:parseAnd() } end; return node end
+function Parser:parseAnd() local node = self:parseCompare(); while self:peek().value == "and" do local_op = self:consume().value; node = { type = "BinaryOp", op = local_op, left = node, right = self:parseCompare() } end; return node end
+function Parser:parseCompare() local node = self:parseBitOr(); local local_ops = { ["=="]=1, ["~="]=1, ["<"]=1, [">"]=1, ["<="]=1, [">="]=1 }; while local_ops[self:peek().value] do local_op = self:consume().value; node = { type = "BinaryOp", op = local_op, left = node, right = self:parseBitOr() } end; return node end
+function Parser:parseBitOr() local node = self:parseBitXor(); while self:peek().value == "|" do local_op = self:consume().value; node = { type = "BinaryOp", op = local_op, left = node, right = self:parseBitXor() } end; return node end
+function Parser:parseBitXor() local node = self:parseBitAnd(); while self:peek().value == "~" do local_op = self:consume().value; node = { type = "BinaryOp", op = local_op, left = node, right = self:parseBitAnd() } end; return node end
+function Parser:parseBitAnd() local node = self:parseBitShift(); while self:peek().value == "&" do local_op = self:consume().value; node = { type = "BinaryOp", op = local_op, left = node, right = self:parseBitShift() } end; return node end
+function Parser:parseBitShift() local node = self:parseConcat(); while self:peek().value == "<<" or self:peek().value == ">>" do local_op = self:consume().value; node = { type = "BinaryOp", op = local_op, left = node, right = self:parseConcat() } end; return node end
+function Parser:parseConcat() local node = self:parseAdd(); if self:peek().value == ".." then local_op = self:consume().value; node = { type = "BinaryOp", op = local_op, left = node, right = self:parseConcat() } end; return node end
+function Parser:parseAdd() local node = self:parseMul(); while self:peek().value == "+" or self:peek().value == "-" do local_op = self:consume().value; node = { type = "BinaryOp", op = local_op, left = node, right = self:parseMul() } end; return node end
+function Parser:parseMul() local node = self:parseUnary(); local local_ops = { ["*"]=1, ["/"]=1, ["//"]=1, ["%"]=1 }; while local_ops[self:peek().value] do local_op = self:consume().value; node = { type = "BinaryOp", op = local_op, left = node, right = self:parseUnary() } end; return node end
+function Parser:parseUnary() local local_ops = { ["not"]="not", ["-"]="-", ["~"]="~", ["#"]="#" }; if local_ops[self:peek().value] then local_op = self:consume().value; return { type = "UnaryOp", op = local_op, right = self:parseUnary() } end; return self:parsePow() end
+function Parser:parsePow() local node = self:parsePrimaryExpr(); if self:peek().value == "^" then local_op = self:consume().value; node = { type = "BinaryOp", op = local_op, left = node, right = self:parsePow() } end; return node end
 function Parser:parsePrimaryExpr()
     local tk = self:peek(); local node
     if tk.type == "number" then node = { type = "Number", value = tonumber(self:consume().value) }
@@ -334,12 +334,12 @@ function Obfuscator.desugar(ast)
             local while_body = { type = "Block", body = { body, { type = "ContinueTarget" }, increment } }
             return walk({ type = "Block", body = { { type = "LocalAssign", vars = { var }, values = { init } }, { type = "While", cond = { type = "BinaryOp", op = "<=", left = { type = "Var", name = var }, right = limit }, body = while_body } } })
         elseif n.type == "ForIn" then
-            local vars = n.vars; local iter = walk(n.iter); local body = walk(n.body)
+            local vars = n.vars; local_iter = walk(n.iter); local body = walk(n.body)
             local fn = string.format("_0xF%X", math.random(0x100, 0xFFF))
             local sn = string.format("_0xS%X", math.random(0x100, 0xFFF))
             local vn = string.format("_0xV%X", math.random(0x100, 0xFFF))
             local kn = string.format("_0xK%X", math.random(0x100, 0xFFF))
-            local setup = { type = "LocalAssign", vars = { fn, sn, vn, kn }, values = { iter, { type = "Boolean", value = true } } }
+            local setup = { type = "LocalAssign", vars = { fn, sn, vn, kn }, values = { local_iter, { type = "Boolean", value = true } } }
             local while_body = { type = "Block", body = { { type = "LocalAssign", vars = vars, values = { { type = "Call", func = { type = "Var", name = fn }, args = { { type = "Var", name = sn }, { type = "Var", name = vn } } } } } } }
             local if_break = { type = "If", cond = { type = "BinaryOp", op = "==", left = { type = "Var", name = vars[1] }, right = { type = "Nil" } }, body = { type = "Block", body = { { type = "Assign", vars = { { type = "Var", name = kn } }, values = { { type = "Boolean", value = false } } } } }, elseBlock = { type = "Block", body = {} }, elseifs = {} }
             table.insert(if_break.elseBlock.body, { type = "Assign", vars = { { type = "Var", name = vn } }, values = { { type = "Var", name = vars[1] } } })
@@ -402,7 +402,7 @@ end
 
 local Virtualizer = {}
 function Virtualizer.virtualize(ast, gm)
-    local ops_list = { "DEFER", "LOADK", "GETVAR", "SETVAR", "GETVAR_G", "SETVAR_G", "GETTABLE", "SETTABLE", "NEWTABLE", "CALL", "RET", "ADD", "SUB", "MUL", "DIV", "IDIV", "MOD", "POW", "BAND", "BOR", "BXOR", "SHL", "SHR", "EQ", "LT", "LE", "CONCAT", "NOT", "UNM", "BNOT", "LEN", "CLOSURE", "LOAD_VA", "LOAD_VARARG", "PICK_RESULT", "POP", "DUP", "SWAP", "JMP", "JMP_IF_FALSE" }
+    local ops_list = { "DEFER", "LOADK", "GETVAR", "SETVAR", "GETVAR_G", "SETVAR_G", "GETTABLE", "SETTABLE", "NEWTABLE", "CALL", "RET", "ADD", "SUB", "MUL", "DIV", "IDIV", "MOD", "POW", "BAND", "BOR", "BXOR", "SHL", "SHR", "EQ", "LT", "LE", "CONCAT", "NOT", "UNM", "BNOT", "LEN", "CLOSURE", "LOAD_VA", "LOAD_VARARG", "PICK_RESULT", "POP", "DUP", "SWAP", "JMP", "JMP_IF_FALSE", "GETVAR_G_CALL", "LOADK_SETVAR" }
     local XK = math.random(1, 0xFFFFFF); local SX1 = math.random(1, 255); local SX2 = math.random(1, 255); local SX3 = math.random(1, 255)
     local function encrypt_k(v)
         local s = (type(v) == "string" and "s" or type(v) == "number" and "n" or type(v) == "boolean" and "b" or "x") .. tostring(v == nil and "" or v == true and "t" or v == false and "f" or v)
@@ -519,7 +519,9 @@ function Virtualizer.virtualize(ast, gm)
         while i <= #insts do
             o2n[i] = #fused + 1
             local c = insts[i]; local n_i = insts[i+1]
-            table.insert(fused, c); i = i + 1
+            if c.op == "GETVAR_G" and n_i and n_i.op == "CALL" then table.insert(fused, { op = "GETVAR_G_CALL", arg = c.arg, arg2 = n_i.arg }); o2n[i+1] = #fused; i = i + 2
+            elseif c.op == "LOADK" and n_i and n_i.op == "SETVAR" then table.insert(fused, { op = "LOADK_SETVAR", arg = c.arg, arg2 = n_i.arg }); o2n[i+1] = #fused; i = i + 2
+            else table.insert(fused, c); i = i + 1 end
         end
         o2n[#insts+1] = #fused + 1
         for _, inst in ipairs(fused) do if inst.op == "JMP" or inst.op == "JMP_IF_FALSE" then inst.arg = o2n[inst.arg] end end
@@ -538,26 +540,26 @@ function Virtualizer.virtualize(ast, gm)
             ids_to_op[id] = ops_to_idx[op]
             table.insert(ops[op], id)
         end
-        local b = {}; local rk = math.random(0, 255); local ck_init = math.random(0, 0xFFFFFF); local ck = ck_init
+        local b = {}; local ck_init = math.random(0, 0xFFFFFF); local ck = ck_init
         for i, v in ipairs(p.b) do
             local op_id = ops[v.op][math.random(#ops[v.op])]
             local pck = op_id + (v.arg or 0) * 256
             if v.arg2 then pck = op_id + (v.arg % 65536) * 256 + (v.arg2 % 65536) * 16777216 end
-            local encrypted = pck ~ ((rk + i) % 256)
-            encrypted = (encrypted ~ (ck % 16777216))
-            ck = (ck * 13 + encrypted) % 16777216
+            ck = (ck * 1103515245 + 12345) % 2147483648
+            local encrypted = pck ~ (ck % 16777216)
+            ck = (ck ~ (encrypted % 16777216)) % 2147483648
             table.insert(b, encrypted)
         end
         local em = { n = 255 }; for i = 0, 255 do em[i] = ids_to_op[i] end
         local k = { n = p.k.n }; for i = 1, p.k.n do local v = p.k[i]; if type(v) == "table" and v.b then k[i] = sp(v) else k[i] = encrypt_k(v) end end
         local cs = 0; for i=1, #b do cs = (cs + b[i]) % 1000000 end
-        return { b = b, k = k, m = em, sk = rk, cs = cs, shk = math.random(0, 0xFFFFFF), ck = ck_init }
+        return { b = b, k = k, m = em, cs = cs, shk = math.random(0, 0xFFFFFF), ck = ck_init }
     end
     local egm = {}; for k, v in pairs(gm) do egm[k] = encrypt_k(v) end; return sp(main), egm, {SX1, SX2, SX3}
 end
 
 local Wrapper = {}
-function Wrapper._sp(p, vn_func) return "{cs=" .. (p.cs or 0) .. ",b={" .. table.concat(p.b, ",") .. "},\nk=" .. Wrapper.sk(p.k, vn_func) .. ",\nm=" .. Wrapper.sk(p.m, vn_func) .. ",\nsk=" .. (p.sk or 0) .. ",\nshk=" .. p.shk .. ",\nck=" .. (p.ck or 0) .. "\n}" end
+function Wrapper._sp(p, vn_func) return "{cs=" .. (p.cs or 0) .. ",b={" .. table.concat(p.b, ",") .. "},\nk=" .. Wrapper.sk(p.k, vn_func) .. ",\nm=" .. Wrapper.sk(p.m, vn_func) .. ",\nshk=" .. p.shk .. ",\nck=" .. (p.ck or 0) .. "\n}" end
 function Wrapper.sk(ks, vn)
     local s = "{"; local n = ks.n or 0; if n == 0 then for k, v in pairs(ks) do if type(k) == "number" and k > n then n = k end end end
     for i=0, n do local v = ks[i]
@@ -578,98 +580,148 @@ function Wrapper.generate(main, gm, sxs)
             s = s .. "[\"" .. k .. "\"]=\"" .. v:gsub(".", function(c) return "\\" .. string.format("%03d", c:byte()) end) .. "\","
         end; return s .. "}"
     end
-    local function oq(v) return "(" .. (v - 100) .. " + 100)" end
+    local function oq(v)
+        if math.random() > 0.5 then
+            local r = math.random(1, 1000)
+            return "(" .. (v - r) .. " + " .. r .. ")"
+        else
+            local r = math.random(1, 1000)
+            return "(" .. (v + r) .. " - " .. r .. ")"
+        end
+    end
     local sx1, sx2, sx3 = sxs[1], sxs[2], sxs[3]
-    local body = "return (function(...)\n"
-    body = body .. "local "..vn("_L_ENV").." = _ENV or _G; local "..vn("_L_G").." = _G; local "..vn("_L_VAULT").." = {};\n"
-    body = body .. "local "..vn("_GTY")..", "..vn("_GIP")..", "..vn("_GERR")..", "..vn("_GTON")..", "..vn("_GTOS")..", "..vn("_GPCL")..", "..vn("_GUPK")..", "..vn("_GPAI")..", "..vn("_GSEL")..", "..vn("_GCLK").." = type, ipairs, error, tonumber, tostring, pcall, (table and table.unpack or unpack), pairs, select, os.clock\n"
-    body = body .. "local "..vn("_L_NAMES").." = {'string','table','math','io','os','debug','coroutine','package','utf8','bit32','print','type','pairs','ipairs','next','error','tonumber','tostring','pcall','select','assert','unpack','load','loadfile','dofile','setmetatable','getmetatable'}\n"
-    body = body .. "local "..vn("_L_HIDE").." = {['string']=1,['table']=1,['math']=1,['io']=1,['os']=1,['debug']=1,['coroutine']=1,['package']=1,['utf8']=1,['bit32']=1,['load']=1,['loadfile']=1,['dofile']=1}\n"
-    body = body .. "for _, n in "..vn("_GIP").."("..vn("_L_NAMES")..") do "..vn("_L_VAULT").."[n] = "..vn("_L_ENV").."[n] or ("..vn("_L_G").." and "..vn("_L_G").."[n]); if "..vn("_L_HIDE").."[n] then "..vn("_L_ENV").."[n] = nil; if "..vn("_L_G").." then "..vn("_L_G").."[n] = nil end end end\n"
-    body = body .. "local "..vn("_M_FL").." = ("..vn("_L_VAULT").."['math'] or math).floor; local "..vn("_S_CH")..", "..vn("_T_CO")..", "..vn("_S_SU")..", "..vn("_T_IN").." = ("..vn("_L_VAULT").."['string'] or string).char, ("..vn("_L_VAULT").."['table'] or table).concat, ("..vn("_L_VAULT").."['string'] or string).sub, ("..vn("_L_VAULT").."['table'] or table).insert\n"
-    body = body .. "local "..vn("_S_BY").." = ("..vn("_L_VAULT").."['string'] or string).byte\n"
-    body = body .. "local "..vn("_GSM")..", "..vn("_GGM").." = "..vn("_L_VAULT").."['setmetatable'], "..vn("_L_VAULT").."['getmetatable']\n"
-    body = body .. "if "..vn("_GSM").." then "..vn("_GPCL").."("..vn("_GSM")..", '', nil) end\n"
-    body = body .. "local "..vn("_GM_RAW").." = " .. sm(gm) .. "\n"
-    body = body .. "local function "..vn("_d").."(v) if "..vn("_GTY").."(v) ~= 'string' then return v end; local r = {}; for i=1, #v do r[#r+1] = "..vn("_S_CH").."((("..vn("_S_BY").."(v, i) ~ "..sx3..") - "..sx2..") % 256 ~ "..sx1..") end; local rs = "..vn("_T_CO").."(r); local t, val = "..vn("_S_SU").."(rs,1,1), "..vn("_S_SU").."(rs,2); if t == 's' then return val elseif t == 'n' then return "..vn("_GTON").."(val) elseif t == 'b' then return val == 't' else return nil end end\n"
-    body = body .. "local function "..vn("_GFG").."(en_val) if "..vn("_L_VAULT").."['debug'] and "..vn("_L_VAULT").."['debug'].gethook() then "..vn("_GERR").."('trace detected') end; local dn = "..vn("_d").."(en_val); if dn == '_G' then return "..vn("_L_G").." end; if dn == '_ENV' then return "..vn("_L_ENV").." end; local on_en = "..vn("_GM_RAW").."[dn]; local on = on_en and "..vn("_d").."(on_en) or dn; local res = "..vn("_L_VAULT").."[on] or "..vn("_L_ENV").."[on]; if not res then "..vn("_GERR").."('GFG fail: ' .. "..vn("_GTOS").."(on)) end; return res end\n"
-    body = body .. "local "..vn("_T_LIMIT").." = "..vn("_GCLK").."();\n"
-    body = body .. "local function "..vn("_EXEC").."("..vn("_PR")..", ...)\n"
-    body = body .. "  local "..vn("_S")..", "..vn("_SS")..", "..vn("_P")..", "..vn("_K")..", "..vn("_V")..", "..vn("_RK")..", "..vn("_DEF")..", "..vn("_SHK")..", "..vn("_CK").." = {}, 0, 1, "..vn("_PR")..".k, {}, "..vn("_PR")..".sk, {}, "..vn("_PR")..".shk, "..vn("_PR")..".ck or 0\n"
-    body = body .. "  local "..vn("_CS").." = 0; for i=1, #"..vn("_PR")..".b do "..vn("_CS").." = ("..vn("_CS").." + "..vn("_PR")..".b[i]) % 1000000 end; if "..vn("_CS").." ~= "..vn("_PR")..".cs then "..vn("_GERR").."('integrity check failed') end\n"
-    body = body .. "  local "..vn("_D")..", "..vn("_ARG").." = 0x12345, 0; while "..vn("_D").." ~= 0 do\n"
-    body = body .. "    if "..vn("_D").." == 0x12345 then\n"
-    body = body .. "      if "..vn("_GCLK").."() - "..vn("_T_LIMIT").." > 30 then "..vn("_GERR").."('timeout') end\n"
-    body = body .. "      if "..vn("_P").." > #"..vn("_PR")..".b then "..vn("_D").." = 0; break end\n"
-    body = body .. "      local _EPCK = "..vn("_PR")..".b["..vn("_P").."];\n"
-    body = body .. "      local _PCK = (_EPCK ~ ("..vn("_CK").." % 16777216)) ~ (("..vn("_RK").." + "..vn("_P")..") % 256);\n"
-    body = body .. "      "..vn("_CK").." = ("..vn("_CK").." * 13 + _EPCK) % 16777216;\n"
-    body = body .. "      "..vn("_P").." = "..vn("_P").." + 1; local _OPI = _PCK % 256; "..vn("_ARG").." = "..vn("_M_FL").."(_PCK / 256); local _OI = "..vn("_PR")..".m[_OPI]\n"
+    local function ek(v)
+        local s = (type(v) == "string" and "s" or type(v) == "number" and "n" or type(v) == "boolean" and "b" or "x") .. tostring(v == nil and "" or v == true and "t" or v == false and "f" or v)
+        local r = {}; for i=1, #s do
+            local b = s:byte(i)
+            b = ((b ~ sx1) + sx2) % 256 ~ sx3
+            table.insert(r, "\\" .. string.format("%03d", b))
+        end; return '"' .. table.concat(r) .. '"'
+    end
 
-    local function si(idx) return vn("_S").."[" .. idx .. " ~ "..vn("_SHK").."]" end
-    local S, SS, ARG, K, V, D, GFG, d, GTY, GERR, GPCL, GUPK, DEF, GGM, GSM, GSEL, L_ENV = vn("_S"), vn("_SS"), vn("_ARG"), vn("_K"), vn("_V"), vn("_D"), vn("_GFG"), vn("_d"), vn("_GTY"), vn("_GERR"), vn("_GPCL"), vn("_GUPK"), vn("_DEF"), vn("_GGM"), vn("_GSM"), vn("_GSEL"), vn("_L_ENV")
+    local name_map = {
+        _L_ENV = vn("_L_ENV"), _L_G = vn("_L_G"), _L_VAULT = vn("_L_VAULT"),
+        _GTY = vn("_GTY"), _GIP = vn("_GIP"), _GERR = vn("_GERR"), _GTON = vn("_GTON"), _GTOS = vn("_GTOS"), _GPCL = vn("_GPCL"), _GUPK = vn("_GUPK"), _GPAI = vn("_GPAI"), _GSEL = vn("_GSEL"), _GCLK = vn("_GCLK"),
+        _L_NAMES = vn("_L_NAMES"), _L_HIDE = vn("_L_HIDE"), _d = vn("_d"), _S_MT = vn("_S_MT"), _M_FL = vn("_M_FL"), _S_CH = vn("_S_CH"), _T_CO = vn("_T_CO"), _S_SU = vn("_S_SU"), _T_IN = vn("_T_IN"), _S_BY = vn("_S_BY"), _GSM = vn("_GSM"), _GGM = vn("_GGM"), _GM_RAW = vn("_GM_RAW"), _GFG = vn("_GFG"), _T_LIMIT = vn("_T_LIMIT"), _EXEC = vn("_EXEC"),
+        _S = vn("_S"), _SS = vn("_SS"), _P = vn("_P"), _K = vn("_K"), _V = vn("_V"), _DEF = vn("_DEF"), _SHK = vn("_SHK"), _CK = vn("_CK"), _D = vn("_D"), _ARG = vn("_ARG"), _PR = vn("_PR"),
+        _S_CH_R = vn("_S_CH_R"), _T_CO_R = vn("_T_CO_R"), _S_SU_R = vn("_S_SU_R"), _S_BY_R = vn("_S_BY_R"), _T_IN_R = vn("_T_IN_R")
+    }
+
+    local body = "return (function(...)\n"
+    body = body .. "local "..name_map._S_CH_R..", "..name_map._T_CO_R..", "..name_map._S_SU_R..", "..name_map._S_BY_R..", "..name_map._T_IN_R.." = string.char, table.concat, string.sub, string.byte, table.insert\n"
+
+    body = body .. "local "..name_map._L_ENV.." = _ENV or _G; local "..name_map._L_G.." = _G; local "..name_map._L_VAULT.." = {};\n"
+    body = body .. "local "..name_map._GTY..", "..name_map._GIP..", "..name_map._GERR..", "..name_map._GTON..", "..name_map._GTOS..", "..name_map._GPCL..", "..name_map._GUPK..", "..name_map._GPAI..", "..name_map._GSEL..", "..name_map._GCLK.." = type, ipairs, error, tonumber, tostring, pcall, (table and table.unpack or unpack), pairs, select, os.clock\n"
+
+    local lib_names = {'string','table','math','io','os','debug','coroutine','package','utf8','bit32','print','type','pairs','ipairs','next','error','tonumber','tostring','pcall','select','assert','unpack','load','loadfile','dofile','setmetatable','getmetatable'}
+    local hide_names = {['string']=1,['table']=1,['math']=1,['io']=1,['os']=1,['debug']=1,['coroutine']=1,['package']=1,['utf8']=1,['bit32']=1,['load']=1,['loadfile']=1,['dofile']=1}
+
+    body = body .. "local "..name_map._L_NAMES.." = {"
+    for _, n in ipairs(lib_names) do body = body .. ek(n) .. "," end
+    body = body .. "}\n"
+
+    body = body .. "local "..name_map._L_HIDE.." = {"
+    for n, _ in pairs(hide_names) do body = body .. "["..ek(n).."]=1," end
+    body = body .. "}\n"
+
+    body = body .. "local function "..name_map._d.."(v) if "..name_map._GTY.."(v) ~= 'string' then return v end; local r = {}; for i=1, #v do r[#r+1] = "..name_map._S_CH_R.."((("..name_map._S_BY_R.."(v, i) ~ "..sx3..") - "..sx2..") % 256 ~ "..sx1..") end; local rs = "..name_map._T_CO_R.."(r); local t, val = "..name_map._S_SU_R.."(rs,1,1), "..name_map._S_SU_R.."(rs,2); if t == 's' then return val elseif t == 'n' then return "..name_map._GTON.."(val) elseif t == 'b' then return val == 't' else return nil end end\n"
+
+    body = body .. "for _, n_en in "..name_map._GIP.."("..name_map._L_NAMES..") do local n = "..name_map._d.."(n_en); "..name_map._L_VAULT.."[n] = "..name_map._L_ENV.."[n] or ("..name_map._L_G.." and "..name_map._L_G.."[n]); if "..name_map._L_HIDE.."[n_en] then "..name_map._L_ENV.."[n] = nil; if "..name_map._L_G.." then "..name_map._L_G.."[n] = nil end end end\n"
+
+    body = body .. "local "..name_map._S_MT.." = (debug and debug.getmetatable('') or (getmetatable and getmetatable('')) or {})['__index']\n"
+    body = body .. "local "..name_map._M_FL.." = ("..name_map._L_VAULT.."['math'] or {}).floor or math.floor; local "..name_map._S_CH..", "..name_map._T_CO..", "..name_map._S_SU..", "..name_map._T_IN.." = "..name_map._S_CH_R..", "..name_map._T_CO_R..", "..name_map._S_SU_R..", "..name_map._T_IN_R.."\n"
+    body = body .. "if "..name_map._L_VAULT.."['string'] then "..name_map._S_CH.." = "..name_map._L_VAULT.."['string'].char; "..name_map._S_SU.." = "..name_map._L_VAULT.."['string'].sub end\n"
+    body = body .. "if "..name_map._L_VAULT.."['table'] then "..name_map._T_CO.." = "..name_map._L_VAULT.."['table'].concat; "..name_map._T_IN.." = "..name_map._L_VAULT.."['table'].insert end\n"
+    body = body .. "local "..name_map._GSM..", "..name_map._GGM.." = "..name_map._L_VAULT.."['setmetatable'] or setmetatable, "..name_map._L_VAULT.."['getmetatable'] or getmetatable\n"
+    body = body .. "if "..name_map._GSM.." then "..name_map._GPCL.."("..name_map._GSM..", '', nil) end\n"
+    body = body .. "local "..name_map._GM_RAW.." = " .. sm(gm) .. "\n"
+
+    body = body .. "local function "..name_map._GFG.."(en_val) if "..name_map._L_VAULT.."['debug'] and "..name_map._L_VAULT.."['debug'].gethook() then "..name_map._GERR.."('trace detected') end; local dn = "..name_map._d.."(en_val); if dn == '_G' then return "..name_map._L_G.." end; if dn == '_ENV' then return "..name_map._L_ENV.." end; local on_en = "..name_map._GM_RAW.."[dn]; local on = on_en and "..name_map._d.."(on_en) or dn; local res = "..name_map._L_VAULT.."[on] or "..name_map._L_ENV.."[on]; if not res then "..name_map._GERR.."('GFG fail: ' .. "..name_map._GTOS.."(on)) end; return res end\n"
+    body = body .. "local "..name_map._T_LIMIT.." = "..name_map._GCLK.."();\n"
+    body = body .. "local function "..name_map._EXEC.."("..name_map._PR..", ...)\n"
+    body = body .. "  local "..name_map._S..", "..name_map._SS..", "..name_map._P..", "..name_map._K..", "..name_map._V..", "..name_map._DEF..", "..name_map._SHK..", "..name_map._CK.." = {}, 0, 1, "..name_map._PR..".k, {}, {}, "..name_map._PR..".shk, "..name_map._PR..".ck or 0\n"
+    body = body .. "  local "..vn("_CS").." = 0; for i=1, #"..name_map._PR..".b do "..vn("_CS").." = ("..vn("_CS").." + "..name_map._PR..".b[i]) % 1000000 end; if "..vn("_CS").." ~= "..name_map._PR..".cs then "..name_map._GERR.."('integrity check failed') end\n"
+    body = body .. "  local "..name_map._D..", "..name_map._ARG.." = 0x12345, 0; while "..name_map._D.." ~= 0 do\n"
+    body = body .. "    if "..name_map._D.." == 0x12345 then\n"
+    body = body .. "      if "..name_map._GCLK.."() - "..name_map._T_LIMIT.." > 30 then "..name_map._GERR.."('timeout') end\n"
+    body = body .. "      if "..name_map._P.." > #"..name_map._PR..".b then "..name_map._D.." = 0; break end\n"
+    body = body .. "      local _EPCK = "..name_map._PR..".b["..name_map._P.."];\n"
+    body = body .. "      "..name_map._CK.." = ("..name_map._CK.." * 1103515245 + 12345) % 2147483648\n"
+    body = body .. "      local _PCK = (_EPCK ~ ("..name_map._CK.." % 16777216));\n"
+    body = body .. "      "..name_map._CK.." = ("..name_map._CK.." ~ (_EPCK % 16777216)) % 2147483648\n"
+    body = body .. "      "..name_map._P.." = "..name_map._P.." + 1; local _OPI = _PCK % 256; "..name_map._ARG.." = "..name_map._M_FL.."(_PCK / 256); local _OI = "..name_map._PR..".m[_OPI]\n"
+
+    local function si(idx) return name_map._S.."[" .. idx .. " ~ "..name_map._SHK.."]" end
+    local function PC_INC() return name_map._P.." = ("..name_map._P.." | 1) + ("..name_map._P.." & 1)" end
+    local function SS_INC() return name_map._SS.." = ("..name_map._SS.." | 1) + ("..name_map._SS.." & 1)" end
+    local function SS_DEC() return name_map._SS.." = "..name_map._SS.." - 1" end
+
+    local S, SS, ARG, K, V, D, GFG, d, GTY, GERR, GPCL, GUPK, DEF, GGM, GSM, GSEL, L_ENV = name_map._S, name_map._SS, name_map._ARG, name_map._K, name_map._V, name_map._D, name_map._GFG, name_map._d, name_map._GTY, name_map._GERR, name_map._GPCL, name_map._GUPK, name_map._DEF, name_map._GGM, name_map._GSM, name_map._GSEL, name_map._L_ENV
 
     local handlers = {
-        LOADK = SS.." = "..SS.." + 1; "..si(SS).." = "..d.."("..K.."["..ARG.."]); "..D.." = 0x12345",
-        GETVAR = SS.." = "..SS.." + 1; "..si(SS).." = "..V.."["..ARG.."]; "..D.." = 0x12345",
-        SETVAR = V.."["..ARG.."] = "..si(SS).."; "..si(SS).." = nil; "..SS.." = "..SS.." - 1; "..D.." = 0x12345",
-        GETVAR_G = SS.." = "..SS.." + 1; "..si(SS).." = "..GFG.."("..K.."["..ARG.."]); "..D.." = 0x12345",
-        SETVAR_G = L_ENV.."["..d.."("..K.."["..ARG.."])] = "..si(SS).."; "..si(SS).." = nil; "..SS.." = "..SS.." - 1; "..D.." = 0x12345",
-        GETTABLE = "local k = "..si(SS).."; "..si(SS).." = nil; "..SS.." = "..SS.." - 1; local t = "..si(SS).."; "..si(SS).." = t[k]; "..D.." = 0x12345",
-        SETTABLE = "local v = "..si(SS).."; "..si(SS).." = nil; "..SS.." = "..SS.." - 1; local k = "..si(SS).."; "..si(SS).." = nil; "..SS.." = "..SS.." - 1; local t = "..si(SS).."; "..si(SS).." = nil; "..SS.." = "..SS.." - 1; t[k] = v; "..D.." = 0x12345",
-        NEWTABLE = SS.." = "..SS.." + 1; "..si(SS).." = {}; "..D.." = 0x12345",
-        CALL = "local n_as, n_re = "..ARG.." % 256, "..vn("_M_FL").."("..ARG.." / 256); local as = {}; for i=1, n_as do as[n_as-i+1] = "..si(SS).."; "..si(SS).." = nil; "..SS.." = "..SS.." - 1 end; local f = "..si(SS).."; "..si(SS).." = nil; "..SS.." = "..SS.." - 1; if not f then "..GERR.."('CALL: nil function') end; local re = {"..GPCL.."(f, "..GUPK.."(as, 1, n_as))}; if not re[1] then "..GERR.."(re[2]) end; if n_re == 255 then for i=2, #re do "..SS.." = "..SS.." + 1; "..si(SS).." = re[i] end else for i=1, n_re do "..SS.." = "..SS.." + 1; "..si(SS).." = re[i+1] end end; "..D.." = 0x12345",
-        RET = "local re = {}; for i=1, "..ARG.." do re["..ARG.."-i+1] = "..si(SS).."; "..si(SS).." = nil; "..SS.." = "..SS.." - 1 end; for i=#"..DEF..",1,-1 do "..DEF.."[i]() end; return "..GUPK.."(re)",
-        ADD = "local r = "..si(SS).."; "..si(SS).." = nil; "..SS.." = "..SS.." - 1; local l = "..si(SS).."; if "..GTY.."(l) == 'number' and "..GTY.."(r) == 'number' and l % 1 == 0 and r % 1 == 0 then "..si(SS).." = (l ~ r) + 2 * (l & r) else "..si(SS).." = l + r end; "..D.." = 0x12345",
-        SUB = "local r = "..si(SS).."; "..si(SS).." = nil; "..SS.." = "..SS.." - 1; local l = "..si(SS).."; if "..GTY.."(l) == 'number' and "..GTY.."(r) == 'number' and l % 1 == 0 and r % 1 == 0 then "..si(SS).." = (l + (~r)) + 1 else "..si(SS).." = l - r end; "..D.." = 0x12345",
-        MUL = "local r = "..si(SS).."; "..si(SS).." = nil; "..SS.." = "..SS.." - 1; local l = "..si(SS).."; "..si(SS).." = l * r; "..D.." = 0x12345",
-        DIV = "local r = "..si(SS).."; "..si(SS).." = nil; "..SS.." = "..SS.." - 1; local l = "..si(SS).."; "..si(SS).." = l / r; "..D.." = 0x12345",
-        POW = "local r = "..si(SS).."; "..si(SS).." = nil; "..SS.." = "..SS.." - 1; local l = "..si(SS).."; "..si(SS).." = l ^ r; "..D.." = 0x12345",
-        IDIV = "local r = "..si(SS).."; "..si(SS).." = nil; "..SS.." = "..SS.." - 1; local l = "..si(SS).."; "..si(SS).." = l // r; "..D.." = 0x12345",
-        MOD = "local r = "..si(SS).."; "..si(SS).." = nil; "..SS.." = "..SS.." - 1; local l = "..si(SS).."; "..si(SS).." = l % r; "..D.." = 0x12345",
-        BAND = "local r = "..si(SS).."; "..si(SS).." = nil; "..SS.." = "..SS.." - 1; local l = "..si(SS).."; "..si(SS).." = l & r; "..D.." = 0x12345",
-        BOR = "local r = "..si(SS).."; "..si(SS).." = nil; "..SS.." = "..SS.." - 1; local l = "..si(SS).."; "..si(SS).." = l | r; "..D.." = 0x12345",
-        BXOR = "local r = "..si(SS).."; "..si(SS).." = nil; "..SS.." = "..SS.." - 1; local l = "..si(SS).."; "..si(SS).." = l ~ r; "..D.." = 0x12345",
-        SHL = "local r = "..si(SS).."; "..si(SS).." = nil; "..SS.." = "..SS.." - 1; local l = "..si(SS).."; "..si(SS).." = l << r; "..D.." = 0x12345",
-        SHR = "local r = "..si(SS).."; "..si(SS).." = nil; "..SS.." = "..SS.." - 1; local l = "..si(SS).."; "..si(SS).." = l >> r; "..D.." = 0x12345",
-        EQ = "local r = "..si(SS).."; "..si(SS).." = nil; "..SS.." = "..SS.." - 1; local l = "..si(SS).."; "..si(SS).." = l == r; "..D.." = 0x12345",
-        LT = "local r = "..si(SS).."; "..si(SS).." = nil; "..SS.." = "..SS.." - 1; local l = "..si(SS).."; "..si(SS).." = l < r; "..D.." = 0x12345",
-        LE = "local r = "..si(SS).."; "..si(SS).." = nil; "..SS.." = "..SS.." - 1; local l = "..si(SS).."; "..si(SS).." = l <= r; "..D.." = 0x12345",
-        CONCAT = "local r = "..si(SS).."; "..si(SS).." = nil; "..SS.." = "..SS.." - 1; local l = "..si(SS).."; "..si(SS).." = l .. r; "..D.." = 0x12345",
+        LOADK = SS_INC().."; "..si(SS).." = "..d.."("..K.."["..ARG.."]); "..D.." = 0x12345",
+        GETVAR = SS_INC().."; "..si(SS).." = "..V.."["..ARG.."]; "..D.." = 0x12345",
+        SETVAR = V.."["..ARG.."] = "..si(SS).."; "..si(SS).." = nil; "..SS_DEC().."; "..D.." = 0x12345",
+        GETVAR_G = SS_INC().."; "..si(SS).." = "..GFG.."("..K.."["..ARG.."]); "..D.." = 0x12345",
+        SETVAR_G = L_ENV.."["..d.."("..K.."["..ARG.."])] = "..si(SS).."; "..si(SS).." = nil; "..SS_DEC().."; "..D.." = 0x12345",
+        GETTABLE = "local k = "..si(SS).."; "..si(SS).." = nil; "..SS_DEC().."; local t = "..si(SS).."; "..si(SS).." = t[k]; "..D.." = 0x12345",
+        SETTABLE = "local v = "..si(SS).."; "..si(SS).." = nil; "..SS_DEC().."; local k = "..si(SS).."; "..si(SS).." = nil; "..SS_DEC().."; local t = "..si(SS).."; "..si(SS).." = nil; "..SS_DEC().."; t[k] = v; "..D.." = 0x12345",
+        NEWTABLE = SS_INC().."; "..si(SS).." = {}; "..D.." = 0x12345",
+        CALL = "local n_as, n_re = "..ARG.." % 256, "..name_map._M_FL.."("..ARG.." / 256); local as = {}; for i=1, n_as do as[n_as-i+1] = "..si(SS).."; "..si(SS).." = nil; "..SS_DEC().." end; local f = "..si(SS).."; "..si(SS).." = nil; "..SS_DEC().."; if not f then "..GERR.."('CALL: nil function') end; local re = {"..GPCL.."(f, "..GUPK.."(as, 1, n_as))}; if not re[1] then "..GERR.."(re[2]) end; if n_re == 255 then for i=2, #re do "..SS_INC().."; "..si(SS).." = re[i] end else for i=1, n_re do "..SS_INC().."; "..si(SS).." = re[i+1] end end; "..D.." = 0x12345",
+        RET = "local re = {}; for i=1, "..ARG.." do re["..ARG.."-i+1] = "..si(SS).."; "..si(SS).." = nil; "..SS_DEC().." end; for i=#"..DEF..",1,-1 do "..DEF.."[i]() end; return "..GUPK.."(re)",
+        ADD = "local r = "..si(SS).."; "..si(SS).." = nil; "..SS_DEC().."; local l = "..si(SS).."; if "..GTY.."(l) == 'number' and "..GTY.."(r) == 'number' and l % 1 == 0 and r % 1 == 0 then "..si(SS).." = (l ~ r) + 2 * (l & r) else "..si(SS).." = l + r end; "..D.." = 0x12345",
+        SUB = "local r = "..si(SS).."; "..si(SS).." = nil; "..SS_DEC().."; local l = "..si(SS).."; if "..GTY.."(l) == 'number' and "..GTY.."(r) == 'number' and l % 1 == 0 and r % 1 == 0 then "..si(SS).." = (l + (~r)) + 1 else "..si(SS).." = l - r end; "..D.." = 0x12345",
+        MUL = "local r = "..si(SS).."; "..si(SS).." = nil; "..SS_DEC().."; local l = "..si(SS).."; "..si(SS).." = l * r; "..D.." = 0x12345",
+        DIV = "local r = "..si(SS).."; "..si(SS).." = nil; "..SS_DEC().."; local l = "..si(SS).."; "..si(SS).." = l / r; "..D.." = 0x12345",
+        POW = "local r = "..si(SS).."; "..si(SS).." = nil; "..SS_DEC().."; local l = "..si(SS).."; "..si(SS).." = l ^ r; "..D.." = 0x12345",
+        IDIV = "local r = "..si(SS).."; "..si(SS).." = nil; "..SS_DEC().."; local l = "..si(SS).."; "..si(SS).." = l // r; "..D.." = 0x12345",
+        MOD = "local r = "..si(SS).."; "..si(SS).." = nil; "..SS_DEC().."; local l = "..si(SS).."; "..si(SS).." = l % r; "..D.." = 0x12345",
+        BAND = "local r = "..si(SS).."; "..si(SS).." = nil; "..SS_DEC().."; local l = "..si(SS).."; "..si(SS).." = l & r; "..D.." = 0x12345",
+        BOR = "local r = "..si(SS).."; "..si(SS).." = nil; "..SS_DEC().."; local l = "..si(SS).."; "..si(SS).." = l | r; "..D.." = 0x12345",
+        BXOR = "local r = "..si(SS).."; "..si(SS).." = nil; "..SS_DEC().."; local l = "..si(SS).."; "..si(SS).." = l ~ r; "..D.." = 0x12345",
+        SHL = "local r = "..si(SS).."; "..si(SS).." = nil; "..SS_DEC().."; local l = "..si(SS).."; "..si(SS).." = l << r; "..D.." = 0x12345",
+        SHR = "local r = "..si(SS).."; "..si(SS).." = nil; "..SS_DEC().."; local l = "..si(SS).."; "..si(SS).." = l >> r; "..D.." = 0x12345",
+        EQ = "local r = "..si(SS).."; "..si(SS).." = nil; "..SS_DEC().."; local l = "..si(SS).."; "..si(SS).." = l == r; "..D.." = 0x12345",
+        LT = "local r = "..si(SS).."; "..si(SS).." = nil; "..SS_DEC().."; local l = "..si(SS).."; "..si(SS).." = l < r; "..D.." = 0x12345",
+        LE = "local r = "..si(SS).."; "..si(SS).." = nil; "..SS_DEC().."; local l = "..si(SS).."; "..si(SS).." = l <= r; "..D.." = 0x12345",
+        CONCAT = "local r = "..si(SS).."; "..si(SS).." = nil; "..SS_DEC().."; local l = "..si(SS).."; "..si(SS).." = l .. r; "..D.." = 0x12345",
         NOT = si(SS).." = not "..si(SS).."; "..D.." = 0x12345",
         UNM = si(SS).." = -"..si(SS).."; "..D.." = 0x12345",
         BNOT = si(SS).." = ~"..si(SS).."; "..D.." = 0x12345",
         LEN = si(SS).." = #"..si(SS).."; "..D.." = 0x12345",
-        CLOSURE = "local pr = "..K.."["..ARG.."]; "..SS.." = "..SS.." + 1; "..si(SS).." = function(...) return "..vn("_EXEC").."(pr, ...) end; "..D.." = 0x12345",
-        LOAD_VA = SS.." = "..SS.." + 1; "..si(SS).." = ("..GSEL.."("..ARG..", ...)); "..D.." = 0x12345",
-        LOAD_VARARG = "local va = {...}; for i=1, #va do "..SS.." = "..SS.." + 1; "..si(SS).." = va[i] end; "..D.." = 0x12345",
+        CLOSURE = "local pr = "..K.."["..ARG.."]; "..SS_INC().."; "..si(SS).." = function(...) return "..name_map._EXEC.."(pr, ...) end; "..D.." = 0x12345",
+        LOAD_VA = SS_INC().."; "..si(SS).." = ("..GSEL.."("..ARG..", ...)); "..D.." = 0x12345",
+        LOAD_VARARG = "local va = {...}; for i=1, #va do "..SS_INC().."; "..si(SS).." = va[i] end; "..D.." = 0x12345",
         PICK_RESULT = "-- not implemented; "..D.." = 0x12345",
-        POP = "for i=1, "..ARG.." do "..si(SS).." = nil; "..SS.." = "..SS.." - 1 end; "..D.." = 0x12345",
-        DUP = "local val = "..si(SS.." - "..ARG).."; "..SS.." = "..SS.." + 1; "..si(SS).." = val; "..D.." = 0x12345",
+        POP = "for i=1, "..ARG.." do "..si(SS).." = nil; "..SS_DEC().." end; "..D.." = 0x12345",
+        DUP = "local val = "..si(SS.." - "..ARG).."; "..SS_INC().."; "..si(SS).." = val; "..D.." = 0x12345",
         SWAP = "local a = "..si(SS).."; "..si(SS).." = "..si(SS.."-1").."; "..si(SS.."-1").." = a; "..D.." = 0x12345",
-        JMP = vn("_P").." = "..ARG.."; "..D.." = 0x12345",
-        JMP_IF_FALSE = "local v = "..si(SS).."; "..si(SS).." = nil; "..SS.." = "..SS.." - 1; if not v then "..vn("_P").." = "..ARG.." end; "..D.." = 0x12345",
-        DEFER = "local f = "..d.."("..K.."["..ARG.."]); "..vn("_T_IN").."("..DEF..", function() "..vn("_EXEC").."(f) end); "..D.." = 0x12345"
+        JMP = name_map._P.." = "..ARG.."; "..D.." = 0x12345",
+        JMP_IF_FALSE = "local v = "..si(SS).."; "..si(SS).." = nil; "..SS_DEC().."; if not v then "..name_map._P.." = "..ARG.." end; "..D.." = 0x12345",
+        GETVAR_G_CALL = "local a1, a2 = "..ARG.." % 65536, "..name_map._M_FL.."("..ARG.." / 65536); local n_as, n_re = a2 % 256, "..name_map._M_FL.."(a2 / 256); local f = "..GFG.."("..K.." [a1]); local as = {}; for i=1, n_as do as[n_as-i+1] = "..si(SS).."; "..si(SS).." = nil; "..SS_DEC().." end; if not f then "..GERR.."('F_CALL: nil function') end; local re = {"..GPCL.."(f, "..GUPK.."(as, 1, n_as))}; if not re[1] then "..GERR.."(re[2]) end; if n_re == 255 then for i=2, #re do "..SS_INC().."; "..si(SS).." = re[i] end else for i=1, n_re do "..SS_INC().."; "..si(SS).." = re[i+1] end end; "..D.." = 0x12345",
+        LOADK_SETVAR = "local a1, a2 = "..ARG.." % 65536, "..name_map._M_FL.."("..ARG.." / 65536); "..V.."[a2] = "..d.."("..K.." [a1]); "..D.." = 0x12345",
+        DEFER = "local f = "..d.."("..K.."["..ARG.."]); "..name_map._T_IN_R.."("..DEF..", function() "..name_map._EXEC.."(f) end); "..D.." = 0x12345"
     }
     local states = {}
     for op_idx, state in pairs(state_map) do table.insert(states, {idx=op_idx, state=state}) end
+    for i = 1, 10 do table.insert(states, {idx = 0, state = math.random(0x1000, 0x999999), bogus = true}) end
     for i = #states, 2, -1 do local j = math.random(i); states[i], states[j] = states[j], states[i] end
 
-    -- Multi-Tier Partitioning
     local function partition(list, depth)
-        if #list <= 3 or depth > 2 then
+        if #list <= 3 or depth > 3 then
             local s = ""
             for i, item in ipairs(list) do
                 s = s .. (i == 1 and "    if " or "    elseif ") .. D .. " == " .. oq(item.state) .. " then\n"
-                s = s .. "      " .. handlers[ops_list[item.idx]]:gsub("0x12345", oq(0x12345)) .. "\n"
+                if item.bogus then s = s .. "      "..GERR.."('illegal state execution')\n"
+                else s = s .. "      " .. handlers[ops_list[item.idx]]:gsub("0x12345", oq(0x12345)) .. "\n" end
             end
             return s .. "    end\n"
         end
-        local mid = math.floor(#list / 2)
-        local left = {}; for i=1, mid do table.insert(left, list[i]) end
+        local mid = math.floor(#list / 2); local left = {}; for i=1, mid do table.insert(left, list[i]) end
         local right = {}; for i=mid+1, #list do table.insert(right, list[i]) end
         local pivot = list[mid].state
-        local s = "    if " .. D .. " <= " .. pivot .. " then\n"
+        local opq_p = "(("..D.." % 2 == 0) and ("..D.." % 2 ~= 1) or true)"
+        local s = "    if " .. D .. " <= " .. pivot .. " and "..opq_p.." then\n"
         s = s .. partition(left, depth + 1)
         s = s .. "    else\n"
         s = s .. partition(right, depth + 1)
@@ -678,11 +730,10 @@ function Wrapper.generate(main, gm, sxs)
     end
 
     table.sort(states, function(a, b) return a.state < b.state end)
-
-    for _, s in ipairs(states) do body = body .. "      if _OI == "..s.idx.." then "..D.." = "..oq(s.state).." end\n" end
+    for _, s in ipairs(states) do if not s.bogus then body = body .. "      if _OI == "..s.idx.." then "..D.." = "..oq(s.state).." end\n" end end
     body = body .. "    end\n"
     body = body .. partition(states, 0)
-    body = body .. "  end\n\n  for _i=1, #"..DEF.." do "..DEF.."[_i]() end\nend\nreturn "..vn("_EXEC").."(" .. Wrapper._sp(main, vn) .. ", ...)\nend)(...)"
+    body = body .. "  end\n\n  for _i=1, #"..name_map._DEF.." do "..name_map._DEF.."[_i]() end\nend\nreturn "..name_map._EXEC.."(" .. Wrapper._sp(main, vn) .. ", ...)\nend)(...)"
     return body
 end
 
