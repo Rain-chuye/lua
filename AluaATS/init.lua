@@ -1,0 +1,16 @@
+appname="标准533ATS/混淆器"
+appver="1.0"
+appcode="1"
+appsdk="15"
+path_pattern=""
+packagename="com.androlua.ats"
+--theme="Theme_Material_Settings"
+app_key=""
+app_channel=""
+developer=""
+description=""
+debugmode=true
+user_permission={
+  "INTERNET",
+  "WRITE_EXTERNAL_STORAGE"
+}
