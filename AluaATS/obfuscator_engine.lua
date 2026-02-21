@@ -443,6 +443,14 @@ function Virtualizer.virtualize(ast, gm)
     local egm = {}; for k, v in pairs(gm) do egm[k] = encrypt_k(v) end; return sp(pp(ast)), XK, ops_list, egm, {SX1, SX2, SX3}
 end
 
+
+
+
+
+
+
+
+
 local Wrapper = {}
 function Wrapper.generate(main, xk, om, gm, sx, integrity)
     local vmap = {}
@@ -476,199 +484,76 @@ function Wrapper.generate(main, xk, om, gm, sx, integrity)
     local v_stack, v_ss, v_p, v_st, v_ar = gv("_S"), gv("_SS"), gv("_P"), gv("_VM_ST"), gv("_AR")
     local v_b, v_k, v_l, v_m, v_va, v_v = gv("_B"), gv("_K"), gv("_L"), gv("_M"), gv("_VA"), gv("_V")
     local v_env, v_env_map, v_x, v_sx, v_d, v_exec, v_clk, v_pr, v_up = gv("_ENV"), gv("_EM"), gv("_X"), gv("_SX"), gv("_D"), gv("_EXE"), gv("_CLK"), gv("_PR"), gv("_UP")
-    local v_nil = gv("_NIL")
-    local v_ah = gv("_AH_CK")
+    local v_nil, v_ah = gv("_NIL"), gv("_AH_CK")
     local dis_id = math.random(1000, 9999)
 
     local function l(t, k) return v_env_map .. "[" .. es(t) .. "][" .. es(k) .. "]" end
     local function gl(k) return v_env_map .. "[" .. es(k) .. "]" end
     local function sa(idx) return v_stack .. "[" .. idx .. "]" end
 
-    local function ah_snippet()
-        return "if " .. gl("debug") .. " then if " .. l("debug", "gethook") .. "() or " .. l("debug", "getinfo") .. "(50, 'f') then " .. gl("os") .. "[\"exit\"]() end end"
+    local body = "local " .. v_env_map .. " = " .. gms .. "\\n"
+    body = body .. "local " .. v_x .. " = " .. tostring(xk) .. "; local " .. v_sx .. " = " .. sx_literal .. "\\n"
+    body = body .. "local " .. v_env .. " = _G or _ENV\\nlocal " .. v_nil .. " = {}\\n"
+    body = body .. "local _GSC = (" .. v_env .. "[" .. es("string") .. "] or _G[" .. es("string") .. "])[" .. es("char") .. "]\\n"
+    body = body .. "local _GSB = (" .. v_env .. "[" .. es("string") .. "] or _G[" .. es("string") .. "])[" .. es("byte") .. "]\\n"
+    body = body .. "local _GUP = (table and table.unpack) or unpack\\n"
+    body = body .. "local _GTC = (" .. v_env .. "[" .. es("table") .. "] or _G[" .. es("table") .. "] or {})[" .. es("concat") .. "] or (" .. v_env .. "[" .. es("table") .. "] or _G[" .. es("table") .. "])[" .. es("concat") .. "]\\n"
+    body = body .. "local function " .. v_d .. "(_V)\\n"
+    body = body .. "    if (" .. v_env .. "[\\\"type\\\"] or _G[\\\"type\\\"])(_V) ~= \\\"string\\\" then return _V end\\n"
+    body = body .. "    local _T = _V:sub(1,1); local _VAL = _V:sub(2)\\n"
+    body = body .. "    if _T == \\\"s\\\" then \\n"
+    body = body .. "        local _R = {}; for _i=1, #_VAL do \\n"
+    body = body .. "            local _B = _GSB(_VAL, _i)\\n"
+    body = body .. "            _B = (_B ~ " .. v_sx .. "[3])\\n"
+    body = body .. "            _B = (_B - (" .. v_sx .. "[2] + _i)) %% 256\\n"
+    body = body .. "            _B = (_B ~ " .. v_sx .. "[1])\\n"
+    body = body .. "            _R[#_R + 1] = _GSC(_B)\\n"
+    body = body .. "        end\\n"
+    body = body .. "        return _GTC(_R)\\n"
+    body = body .. "    elseif _T == \\\"n\\\" then \\n"
+    body = body .. "        local _p1, _p2 = _VAL:find(\\\"|\\\"); local _p3, _p4 = _VAL:find(\\\"|\\\", _p2 + 1)\\n"
+    body = body .. "        local _v = tonumber(_VAL:sub(1, _p1 - 1)); local _k1 = tonumber(_VAL:sub(_p2 + 1, _p3 - 1)); local _k2 = tonumber(_VAL:sub(_p4 + 1))\\n"
+    body = body .. "        return (_v ~ _k2) - _k1\\n"
+    body = body .. "    elseif _T == \\\"b\\\" then return _VAL == \\\"t\\\"\\n"
+    body = body .. "    elseif _T == \\\"x\\\" then return nil\\n"
+    body = body .. "    end\\n"
+    body = body .. "    return nil\\n"
+    body = body .. "end\\n"
+    body = body .. "local function " .. v_exec .. "(" .. v_pr .. ", " .. v_up .. ", ...)\\n"
+    body = body .. "    local function " .. v_ah .. "()\\n"
+    body = body .. "        local _ok1, _db = pcall(require, \\\"debug\\\")\\n"
+    body = body .. "        if _ok1 and _db then if _db.gethook() or _db.getinfo(50, 'f') then " .. gl("os") .. "[\\\"exit\"]() end end\\n"
+    body = body .. "        local _ok2, _io = pcall(require, \"io\")\\n"
+    body = body .. "        if _ok2 and _io then\\n"
+    body = body .. "            local _f = _io.open(\\\"/proc/self/maps\\\", \\\"r\\\")\\n"
+    body = body .. "            if _f then local _m = _f:read(\\\"*a\\\"); _f:close(); if _m:find(\\\"frida\\\") or _m:find(\\\"xposed\\\") then " .. gl("os") .. "[\\\"exit\"]() end end\\n"
+    body = body .. "        end\\n"
+    body = body .. "        local _ok3, _lj = pcall(function() return luajava end)\\n"
+    body = body .. "        if _ok3 and _lj then\\n"
+    body = body .. "            pcall(function()\\n"
+    body = body .. "                local _File = _lj.bindClass(\\\"java.io.File\\\")\\n"
+    body = body .. "                if _File(\\\"/data/local/tmp/frida-server\\\").exists() then " .. gl("os") .. "[\\\"exit\"]() end\\n"
+    body = body .. "            end)\\n"
+    body = body .. "        end\\n"
+    body = body .. "    end\\n"
+    body = body .. "    " .. v_ah .. "()\\n"
+    body = body .. "    local " .. v_clk .. " = " .. l("os", "clock") .. "(); " .. l("math", "randomseed") .. "(" .. v_pr .. ".s or " .. l("os", "time") .. "())\\n"
+    if integrity then
+        body = body .. "    if true then\\n"
+        body = body .. "        local _H = 0; for _i=1, #" .. v_pr .. ".b do _H = (_H + " .. v_pr .. ".b[_i]) %% 4294967296 end\\n"
+        body = body .. "        if _H ~= " .. v_pr .. ".h then " .. gl("error") .. "(\\\"Integrity check failed\\\") end\\n"
+        body = body .. "    end\\n"
     end
-
-    local op_codes = {
-        LOADK = sa(v_ss) .. " = " .. v_k .. "[" .. v_ar .. "]; " .. v_st .. " = " .. dis_id,
-        GETVAR = "local _N = " .. v_d .. "(" .. v_k .. "[" .. v_ar .. "]); " .. sa(v_ss) .. " = " .. v_v .. "[_N]; if " .. sa(v_ss) .. " == " .. v_nil .. " then " .. sa(v_ss) .. " = _G[_N] or " .. v_env .. "[_N] end; " .. v_st .. " = " .. dis_id,
-        SETVAR = "local _N = " .. v_d .. "(" .. v_k .. "[" .. v_ar .. "]); local _VAL = " .. sa(v_ss) .. "; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; if " .. v_v .. "[_N] ~= nil then " .. v_v .. "[_N] = _VAL else " .. v_env .. "[_N] = _VAL; _G[_N] = _VAL end; " .. v_st .. " = " .. dis_id,
-        GETTABLE = "local _K = " .. sa(v_ss) .. "; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; local _T = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = _T[_K]; " .. v_st .. " = " .. dis_id,
-        SETTABLE = "local _K = " .. sa(v_ss) .. "; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; local _T = " .. sa(v_ss) .. "; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; local _V = " .. sa(v_ss) .. "; _T[_K] = _V; " .. v_st .. " = " .. dis_id,
-        SETTABLE_IMM = "local _V = " .. sa(v_ss) .. "; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; local _K = " .. sa(v_ss) .. "; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; local _T = " .. sa(v_ss) .. "; _T[_K] = _V; " .. v_ss .. " = " .. mba_add(v_ss, "1") .. "; " .. v_st .. " = " .. dis_id,
-        SETTABLE_MULTI = "local _V = { ... }; local _T = " .. sa(v_ss) .. "; for _i=1, #" .. v_va .. " do _T[#_T+1] = " .. v_va .. "[_i] end; " .. v_st .. " = " .. dis_id,
-        NEWTABLE = v_ss .. " = " .. mba_add(v_ss, "1") .. "; " .. sa(v_ss) .. " = {}; " .. v_st .. " = " .. dis_id,
-        ADD = "local _R = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; local _L = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = _L + _R; " .. v_st .. " = " .. dis_id,
-        SUB = "local _R = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; local _L = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = _L - _R; " .. v_st .. " = " .. dis_id,
-        MUL = "local _R = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; local _L = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = _L * _R; " .. v_st .. " = " .. dis_id,
-        DIV = "local _R = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; local _L = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = _L / _R; " .. v_st .. " = " .. dis_id,
-        MOD = "local _R = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; local _L = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = _L % _R; " .. v_st .. " = " .. dis_id,
-        POW = "local _R = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; local _L = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = _L ^ _R; " .. v_st .. " = " .. dis_id,
-        UNM = sa(v_ss) .. " = -" .. sa(v_ss) .. "; " .. v_st .. " = " .. dis_id,
-        LEN = sa(v_ss) .. " = #" .. sa(v_ss) .. "; " .. v_st .. " = " .. dis_id,
-        NOT = sa(v_ss) .. " = not " .. sa(v_ss) .. "; " .. v_st .. " = " .. dis_id,
-        EQ = "local _R = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; local _L = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = (_L == _R); " .. v_st .. " = " .. dis_id,
-        NE = "local _R = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; local _L = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = (_L ~= _R); " .. v_st .. " = " .. dis_id,
-        LT = "local _R = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; local _L = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = (_L < _R); " .. v_st .. " = " .. dis_id,
-        GT = "local _R = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; local _L = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = (_L > _R); " .. v_st .. " = " .. dis_id,
-        LE = "local _R = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; local _L = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = (_L <= _R); " .. v_st .. " = " .. dis_id,
-        GE = "local _R = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; local _L = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = (_L >= _R); " .. v_st .. " = " .. dis_id,
-        CONCAT = "local _R = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; local _L = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = _L .. _R; " .. v_st .. " = " .. dis_id,
-        JMP = v_p .. " = " .. v_ar .. "; " .. v_st .. " = " .. dis_id,
-        JMP_IF_TRUE = "if " .. sa(v_ss) .. " then " .. v_p .. " = " .. v_ar .. " end; " .. v_st .. " = " .. dis_id,
-        JMP_IF_FALSE = "if not " .. sa(v_ss) .. " then " .. v_p .. " = " .. v_ar .. " end; " .. v_st .. " = " .. dis_id,
-        CALL = "local _A = " .. v_ar .. "; local _P = {}; for _i=1, _A do _P[_A-_i+1] = " .. sa(v_ss) .. "; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. " end; local _F = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = _F(_GUP(_P)); " .. v_st .. " = " .. dis_id,
-        CALL_M = "local _A = " .. v_ar .. "; local _P = {}; for _i=1, _A-1 do _P[_A-_i] = " .. sa(v_ss) .. "; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. " end; for _i=1, #" .. v_va .. " do _P[#_P+1] = " .. v_va .. "[_i] end; local _F = " .. sa(v_ss) .. "; " .. v_va .. " = " .. l("table", "pack") .. "(_F(_GUP(_P))); " .. sa(v_ss) .. " = " .. v_va .. "[1]; " .. v_st .. " = " .. dis_id,
-        RET = "local _R = " .. v_ar .. "; if _R == 0 then return elseif _R == 1 then return " .. sa(v_ss) .. " else local _P = {}; for _i=1, _R do _P[_R-_i+1] = " .. sa(v_ss) .. "; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. " end; return _GUP(_P) end",
-        RET_M = "return _GUP(" .. v_va .. ", 1, " .. v_va .. ".n)",
-        VARARG = v_ss .. " = " .. mba_add(v_ss, "1") .. "; " .. sa(v_ss) .. " = " .. v_va .. "[" .. v_ar .. "]; " .. v_st .. " = " .. dis_id,
-        VARARG_M = v_va .. " = " .. l("table", "pack") .. "(_GUP(" .. v_va .. ", " .. v_ar .. ")); " .. sa(v_ss) .. " = " .. v_va .. "[1]; " .. v_st .. " = " .. dis_id,
-        CLOSURE = "local _PR = " .. v_k .. "[" .. v_ar .. "]; " .. sa(v_ss) .. " = function(...) return " .. v_exec .. "(_PR, nil, ...) end; " .. v_st .. " = " .. dis_id,
-        POP = "for _i=1, " .. v_ar .. " do " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. " end; " .. v_st .. " = " .. dis_id,
-        DUP = "local _V = " .. sa(v_ss) .. "; " .. v_ss .. " = " .. mba_add(v_ss, "1") .. "; " .. sa(v_ss) .. " = _V; " .. v_st .. " = " .. dis_id,
-        SWAP = "local _A, _B = " .. sa(v_ss) .. ", " .. sa(v_ss .. "-1") .. "; " .. sa(v_ss) .. ", " .. sa(v_ss .. "-1") .. " = _B, _A; " .. v_st .. " = " .. dis_id,
-        PICK_RESULT = sa(v_ss) .. " = " .. v_va .. "[" .. v_ar .. "]; " .. v_st .. " = " .. dis_id,
-        BOR = "local _R = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; local _L = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = _L | _R; " .. v_st .. " = " .. dis_id,
-        BXOR = "local _R = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; local _L = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = _L ~ _R; " .. v_st .. " = " .. dis_id,
-        BAND = "local _R = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; local _L = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = _L & _R; " .. v_st .. " = " .. dis_id,
-        SHL = "local _R = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; local _L = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = _L << _R; " .. v_st .. " = " .. dis_id,
-        SHR = "local _R = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; local _L = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = _L >> _R; " .. v_st .. " = " .. dis_id,
-        IDIV = "local _R = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = nil; " .. v_ss .. " = " .. mba_sub(v_ss, "1") .. "; local _L = " .. sa(v_ss) .. "; " .. sa(v_ss) .. " = _L // _R; " .. v_st .. " = " .. dis_id,
-        BNOT = sa(v_ss) .. " = ~" .. sa(v_ss) .. "; " .. v_st .. " = " .. dis_id,
-        NOP = v_st .. " = " .. dis_id
-    }
-
-    -- Inject anti-hook snippets into some opcode handlers
-    local ops_to_protect = { "GETVAR", "SETVAR", "CALL", "RET" }
-    for _, op in ipairs(ops_to_protect) do
-        op_codes[op] = "if " .. math.random(1, 100) .. " > 95 then " .. v_ah .. "() end; " .. op_codes[op]
-    end
-
-    local states = {}
-    local op_to_state = {}
-    local all_ops = {}
-    for op, _ in pairs(op_codes) do table.insert(all_ops, op) end
-    table.sort(all_ops)
-
-    for _, op in ipairs(all_ops) do
-        local sid = math.random(1000, 10000)
-        while states[sid] do sid = sid + 1 end
-        states[sid] = op_codes[op]
-        op_to_state[op] = sid
-    end
-
-    for i=1, 40 do
-        local sid = math.random(10000, 20000)
-        while states[sid] do sid = sid + 1 end
-        states[sid] = v_st .. " = " .. math.random(1, 1000) .. "; if 1+1==3 then " .. v_p .. "=0 end"
-    end
-
-    local t_ids = {}
-    for sid in pairs(states) do table.insert(t_ids, ((sid * 13) + 7) % 10007) end
-    table.sort(t_ids)
-    local mid_t_idx = math.floor(#t_ids / 2)
-    local mid_t_sid = t_ids[mid_t_idx] or 0
-
-    local dispatcher_cases = {}
-    for op, sid in pairs(op_to_state) do
-        local trans = v_st .. " = ((" .. sid .. " * 13) + 7) % 10007"
-        table.insert(dispatcher_cases, "_OPN == " .. es(op) .. " then " .. trans)
-    end
-
-    local vm_flattened = {}
-    table.insert(vm_flattened, string.format("elseif (" .. v_st .. " ~ %d) == 0 then", dis_id))
-    table.insert(vm_flattened, "    if " .. v_p .. " > #" .. v_b .. " or (" .. l("os", "clock") .. "() - " .. v_clk .. " > 30.0) then " .. v_st .. " = 0 else")
-    table.insert(vm_flattened, "        local _PCK = " .. v_b .. "[" .. v_p .. "]; " .. v_p .. " = " .. mba_add(v_p, "1"))
-    table.insert(vm_flattened, "        _PCK = (_PCK ~ " .. v_x .. ")")
-    table.insert(vm_flattened, "        _PCK = (_PCK - " .. v_pr .. ".x2) % 4294967296")
-    table.insert(vm_flattened, "        _PCK = (_PCK ~ " .. v_pr .. ".x1)")
-    table.insert(vm_flattened, "        local _OPI = (_PCK & 0xFF); " .. v_ar .. " = (_PCK >> 8); local _OPN = " .. v_m .. "[_OPI]")
-    table.insert(vm_flattened, "        if " .. table.concat(dispatcher_cases, " elseif ") .. " else " .. v_st .. " = 0 end end")
-
-    local d1_cases = {}
-    local d2_cases = {}
-    for sid, code in pairs(states) do
-        local target_sid = ((sid * 13) + 7) % 10007
-        local back_to_dis = v_st .. " = ((" .. v_st .. " - 7) * 6928) % 10007; " .. v_st .. " = " .. dis_id
-        local _case
-        if code:match("return") then
-            _case = "elseif (" .. v_st .. " ~ " .. target_sid .. ") == 0 then " .. code
-        else
-            _case = "elseif (" .. v_st .. " ~ " .. target_sid .. ") == 0 then " .. code .. "; " .. back_to_dis
-        end
-        if target_sid < mid_t_sid then table.insert(d1_cases, _case) else table.insert(d2_cases, _case) end
-    end
-
-    local d_logic = "elseif true then if (function(s) return s < " .. mid_t_sid .. " end)(" .. v_st .. ") then \n" ..
-                    " if false then \n" .. table.concat(d1_cases, "\n") .. "\n end \n" ..
-                    " else if false then \n" .. table.concat(d2_cases, "\n") .. "\n end end"
-    table.insert(vm_flattened, d_logic)
-
-    local gms = "{"; for k, v in pairs(gm) do gms = gms .. "[" .. es(k) .. "]=" .. es(v) .. "," end; gms = gms .. "}"
-    local sx_literal = "{" .. table.concat(sx, ",") .. "}"
-
-    local body = "local " .. v_env_map .. " = " .. gms .. "\n"
-    body = body .. "local " .. v_x .. " = " .. tostring(xk) .. "; local " .. v_sx .. " = " .. sx_literal .. "\n"
-    body = body .. "local " .. v_env .. " = _G or _ENV\nlocal " .. v_nil .. " = {}\n"
-    body = body .. "local _GSC = (" .. v_env .. "[" .. es("string") .. "] or _G[" .. es("string") .. "])[" .. es("char") .. "]\n"
-    body = body .. "local _GSB = (" .. v_env .. "[" .. es("string") .. "] or _G[" .. es("string") .. "])[" .. es("byte") .. "]\n"
-    body = body .. "local _GUP = (table and table.unpack) or unpack
-    local _GTC = (" .. v_env .. "[" .. es("table") .. "] or _G[" .. es("table") .. "] or {})[" .. es("concat") .. "] or (" .. v_env .. "[" .. es("table") .. "] or _G[" .. es("table") .. "])[" .. es("concat") .. "]\n"
-
-    body = body .. "local function " .. v_d .. "(_V)\n"
-    body = body .. "    if (" .. v_env .. "[\"type\"] or _G[\"type\"])(" .. "_V) ~= \"string\" then return _V end\n"
-    body = body .. "    local _T = _V:sub(1,1); local _VAL = _V:sub(2)\n"
-    body = body .. "    if _T == \"s\" then \n"
-    body = body .. "        local _R = {}; for _i=1, #_VAL do \n"
-    body = body .. "            local _B = _GSB(_VAL, _i)\n"
-    body = body .. "            _B = (_B ~ " .. v_sx .. "[3])\n"
-    body = body .. "            _B = (_B - (" .. v_sx .. "[2] + _i)) % 256\n"
-    body = body .. "            _B = (_B ~ " .. v_sx .. "[1])\n"
-    body = body .. "            _R[#_R + 1] = _GSC(_B)\n"
-    body = body .. "        end\n"
-    body = body .. "        return _GTC(_R)\n"
-    body = body .. "    elseif _T == \"n\" then \n"
-    body = body .. "        local _p1, _p2 = _VAL:find(\"|\"); local _p3, _p4 = _VAL:find(\"|\", _p2 + 1)\n"
-    body = body .. "        local _v = tonumber(_VAL:sub(1, _p1 - 1)); local _k1 = tonumber(_VAL:sub(_p2 + 1, _p3 - 1)); local _k2 = tonumber(_VAL:sub(_p4 + 1))\n"
-    body = body .. "        return (_v ~ _k2) - _k1\n"
-    body = body .. "    elseif _T == \"b\" then return _VAL == \"t\"\n"
-    body = body .. "    elseif _T == \"x\" then return nil\n"
-    body = body .. "    end\n"
-    body = body .. "    return nil\n"
-    body = body .. "end\n"
-
-    body = body .. "local function " .. v_exec .. "(" .. v_pr .. ", " .. v_up .. ", ...)\n"
-    body = body .. "    local function " .. v_ah .. "()\n"
-    body = body .. "        local _ok1, _db = pcall(require, \"debug\")\n"
-    body = body .. "        if _ok1 and _db then if _db.gethook() or _db.getinfo(50, 'f') then " .. gl("os") .. "[\"exit\"]() end end\n"
-    body = body .. "        local _ok2, _io = pcall(require, \"io\")\n"
-    body = body .. "        if _ok2 and _io then\n"
-    body = body .. "            local _f = _io.open(\"/proc/self/maps\", \"r\")\n"
-    body = body .. "            if _f then local _m = _f:read(\"*a\"); _f:close(); if _m:find(\"frida\") or _m:find(\"xposed\") then " .. gl("os") .. "["exit"]() end end\n"
-    body = body .. "        end\n"
-    body = body .. "        local _ok3, _lj = pcall(function() return luajava end)\n"
-    body = body .. "        if _ok3 and _lj then\n"
-    body = body .. "            pcall(function()\n"
-    body = body .. "                local _File = _lj.bindClass(\"java.io.File\")\n"
-    body = body .. "                if _File(\"/data/local/tmp/frida-server\").exists() then " .. gl("os") .. "[\"exit\"]() end\n"
-    body = body .. "            end)\n"
-    body = body .. "        end\n"
-    body = body .. "    end\n"
-    body = body .. "    " .. v_ah .. "()\n"
-    body = body .. "    local " .. v_clk .. " = " .. l("os", "clock") .. "(); " .. l("math", "randomseed") .. "(" .. v_pr .. ".s or " .. l("os", "time") .. "())\n"
-    body = body .. "    if " .. (integrity and "true" or "false") .. " then\n"
-    body = body .. "        local _H = 0; for _i=1, #" .. v_pr .. ".b do _H = (_H + " .. v_pr .. ".b[_i]) % 4294967296 end\n"
-    body = body .. "        if _H ~= " .. v_pr .. ".h then " .. gl("error") .. "(\"Integrity check failed\") end\n"
-    body = body .. "    end\n"
-    body = body .. "    local " .. v_stack .. ", " .. v_ss .. ", " .. v_p .. ", " .. v_st .. ", " .. v_ar .. " = {}, " .. v_pr .. ".r or 0, 1, " .. dis_id .. ", 0\n"
-    body = body .. "    local " .. v_b .. ", " .. v_k .. ", " .. v_l .. ", " .. v_m .. " = " .. v_pr .. ".b, " .. v_pr .. ".k, " .. v_pr .. ".l, " .. v_pr .. ".m; local " .. v_va .. " = " .. l("table", "pack") .. "(...)\n"
-    body = body .. "    local " .. v_v .. " = {}\n"
-    body = body .. "    for _, _n in " .. gl("ipairs") .. "(" .. v_l .. ") do " .. v_v .. "[" .. v_d .. "(_n)] = " .. v_nil .. " end\n"
-    body = body .. "    while (function() local _o = " .. (math.random(1, 100)) .. "; return _o == _o end)() and (" .. v_st .. " ~ 0) ~= 0 do\n"
-    body = body .. "        if 1 == 2 then\n"
-    body = body .. table.concat(vm_flattened, "\n")
-    body = body .. "\n        else " .. v_st .. " = 0 end\n"
-    body = body .. "    end\n"
-    body = body .. "end\n"
+    body = body .. "    local " .. v_stack .. ", " .. v_ss .. ", " .. v_p .. ", " .. v_st .. ", " .. v_ar .. " = {}, " .. v_pr .. ".r or 0, 1, " .. dis_id .. ", 0\\n"
+    body = body .. "    local " .. v_b .. ", " .. v_k .. ", " .. v_l .. ", " .. v_m .. " = " .. v_pr .. ".b, " .. v_pr .. ".k, " .. v_pr .. ".l, " .. v_pr .. ".m; local " .. v_va .. " = " .. l("table", "pack") .. "(...)\\n"
+    body = body .. "    local " .. v_v .. " = {}\\n"
+    body = body .. "    for _, _n in " .. gl("ipairs") .. "(" .. v_l .. ") do " .. v_v .. "[" .. v_d .. "(_n)] = " .. v_nil .. " end\\n"
+    body = body .. "    while (function() local _o = " .. math.random(1, 100) .. "; return _o == _o end)() and (" .. v_st .. " ~ 0) ~= 0 do\\n"
+    body = body .. "        if 1 == 2 then\\n"
+    body = body .. "        " .. table.concat(vm_flattened, "\n") .. "\\n"
+    body = body .. "        else " .. v_st .. " = 0 end\\n"
+    body = body .. "    end\\n"
+    body = body .. "end\\n"
     body = body .. "return " .. v_exec .. "(" .. Wrapper._sp(main) .. ", nil, ...)"
     return body
 end
